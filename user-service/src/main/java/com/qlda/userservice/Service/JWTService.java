@@ -31,6 +31,7 @@ public class JWTService {
                 .collect(Collectors.joining(" "));
 
         JwtClaimsSet claims = JwtClaimsSet.builder()
+                .id(UUID.randomUUID().toString())
                 .issuedAt(now)
                 .expiresAt(now.plusSeconds(accessTokenExpiry))
                 .subject(authentication.getName())

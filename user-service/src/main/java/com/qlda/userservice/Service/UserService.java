@@ -19,8 +19,10 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import org.springframework.stereotype.Service;
 
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -32,6 +34,7 @@ public class UserService {
     private final AuthenticationManager authenticationManager;
     private final JWTService jwtService;
     private final RefreshTokenRepo refreshTokenRepo;
+    private final TokenBlacklistService tokenBlacklistService;
 
     @Value("${jwt.refresh-token-expiry}")
     private long refreshTokenExpiry;
@@ -115,7 +118,19 @@ public class UserService {
         refreshTokenRepo.save(new_refreshTokenEntity);
 
         return new TokenResponse(token, refreshToken, "Bearer", accessTokenExpiry);
+    }
 
+    public void logout(Authentication authentication)
+    {
+        JwtAuthenticationToken jwtAuth = (JwtAuthenticationToken) authentication;
 
+        String jti = jwtAuth.getToken().getId();
+        Instant expiresAt = jwtAuth.getToken().getExpiresAt();
+
+        tokenBlacklistService.blacklist(jti, expiresAt);
+
+        User user = userRepo.findByEmail(authentication.getName())
+                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+        refreshTokenRepo.deleteAllByUser(user);
     }
 }
