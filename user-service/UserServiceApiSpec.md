@@ -445,8 +445,6 @@ Thêm địa chỉ mới.
 **Request Body**
 ```json
 {
-  "fullName":    "Nguyen Van A",
-  "phone":       "0901234567",
   "province":    "TP. Hồ Chí Minh",
   "district":    "Quận 1",
   "ward":        "Phường Bến Nghé",
