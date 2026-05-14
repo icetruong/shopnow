@@ -32,6 +32,9 @@ public class UserService {
     @Value("${jwt.refresh-token-expiry}")
     private long refreshTokenExpiry;
 
+    @Value("${jwt.access-token-expiry}")
+    private long accessTokenExpiry;
+
     public RegisterResponse register(RegisterRequest request)
     {
         if(userRepo.existsByEmail(request.getEmail()))
@@ -72,6 +75,6 @@ public class UserService {
 
         refreshTokenRepo.save(refreshTokenEntity);
 
-        return new LoginResponse(token, refreshToken, "Bearer", refreshTokenExpiry);
+        return new LoginResponse(token, refreshToken, "Bearer", accessTokenExpiry);
     }
 }
