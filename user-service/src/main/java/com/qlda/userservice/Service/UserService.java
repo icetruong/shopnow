@@ -17,10 +17,12 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 @Service
 @RequiredArgsConstructor
@@ -80,9 +82,9 @@ public class UserService {
         return new TokenResponse(token, refreshToken, "Bearer", accessTokenExpiry);
     }
 
-    public TokenResponse getTokenByRefreshToken(RefreshTokenRequest request, Authentication authentication)
+    public TokenResponse getTokenByRefreshToken(RefreshTokenRequest request)
     {
-        RefreshToken refreshTokenEntity = refreshTokenRepo.findByTokenAndUser_Email(request.getRefreshToken(), authentication.getName())
+        RefreshToken refreshTokenEntity = refreshTokenRepo.findByToken(request.getRefreshToken())
                 .orElseThrow(() -> new ResourceNotFoundException("refreshToken không hợp lệ" + request.getRefreshToken()));
 
         if(refreshTokenEntity.isExpired())
@@ -92,6 +94,12 @@ public class UserService {
         }
 
         User user = refreshTokenEntity.getUser();
+
+        Authentication authentication = new UsernamePasswordAuthenticationToken(
+                user.getEmail(),
+                null,
+                List.of(new SimpleGrantedAuthority(user.getRole().name()))
+        );
 
         refreshTokenRepo.delete(refreshTokenEntity);
 

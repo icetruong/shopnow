@@ -41,11 +41,11 @@ public class AuthController {
     }
 
     @GetMapping("/refresh")
-    public ResponseEntity<ApiResponse<TokenResponse>> refresh(@RequestBody RefreshTokenRequest request, Authentication authentication)
+    public ResponseEntity<ApiResponse<TokenResponse>> refresh(@RequestBody RefreshTokenRequest request)
     {
         return ResponseEntity.ok(ApiResponse.success(
                 "Dùng Refresh token đổi lấy token thành công",
-                userService.getTokenByRefreshToken(request, authentication)
+                userService.getTokenByRefreshToken(request)
         ));
     }
 }
