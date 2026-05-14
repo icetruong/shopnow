@@ -48,4 +48,13 @@ public class AuthController {
                 userService.getTokenByRefreshToken(request)
         ));
     }
+
+    public ResponseEntity<ApiResponse<Void>> logout(@RequestBody RefreshTokenRequest request, Authentication authentication)
+    {
+        userService.logout(authentication);
+        return ResponseEntity.ok(ApiResponse.success(
+                "Đăng xuất thành công", null
+
+        ));
+    }
 }
