@@ -17,6 +17,9 @@ import com.qlda.userservice.Entity.User;
 import com.qlda.userservice.Entity.UserAddress;
 import com.qlda.userservice.Enum.UserProvider;
 import com.qlda.userservice.Enum.UserRole;
+import com.qlda.userservice.Event.KafkaEvent;
+import com.qlda.userservice.Event.UserPasswordResetPayload;
+import com.qlda.userservice.Event.UserRegisteredPayload;
 import com.qlda.userservice.Exception.*;
 import com.qlda.userservice.Repository.RefreshTokenRepo;
 import com.qlda.userservice.Repository.UserRepo;
@@ -38,7 +41,6 @@ import org.springframework.stereotype.Service;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.Objects;
 import java.util.UUID;
 
 @Service
@@ -52,6 +54,7 @@ public class UserService {
     private final TokenBlacklistService tokenBlacklistService;
     private final TokenResetPasswordService tokenResetPasswordService;
     private final TokenVerifyEmailService tokenVerifyEmailService;
+    private final KafkaProducerService kafkaProducerService;
 
     @Value("${jwt.refresh-token-expiry}")
     private long refreshTokenExpiry;
@@ -79,6 +82,19 @@ public class UserService {
         String token = jwtService.generateRandomToken();
 
         tokenVerifyEmailService.verifyToken(token, save.getId().toString());
+
+        KafkaEvent<UserRegisteredPayload> event = KafkaEvent.of(
+                "user.registered",
+                new UserRegisteredPayload(
+                        save.getId().toString(),
+                        save.getEmail(),
+                        save.getFullName(),
+                        save.getProvider().toString(),
+                        save.getCreatedAt().toString()
+                )
+        );
+
+        kafkaProducerService.publish("user.registered", save.getId().toString(), event);
 
         return new RegisterResponse(save.getId(), save.getEmail());
     }
@@ -165,6 +181,18 @@ public class UserService {
 
         String token = jwtService.generateRandomToken();
         tokenResetPasswordService.resetPassword(token, Instant.now().plusSeconds(resetPasswordTokenExpiry), user.getId().toString());
+
+        KafkaEvent<UserPasswordResetPayload> event = KafkaEvent.of(
+                "user.password_reset_requested",
+                new UserPasswordResetPayload(
+                        user.getId().toString(),
+                        user.getEmail(),
+                        token,
+                        Instant.now().plusSeconds(resetPasswordTokenExpiry).toString()
+                )
+        );
+
+        kafkaProducerService.publish("user.password_reset_requested", user.getId().toString(), event);
 
         return new ForgotPasswordResponse(token, resetPasswordTokenExpiry);
     }
