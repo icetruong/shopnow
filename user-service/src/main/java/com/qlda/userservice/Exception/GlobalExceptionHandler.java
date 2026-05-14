@@ -100,4 +100,17 @@ public class GlobalExceptionHandler {
                 .body(ApiResponse.fail(ex.getMessage(), "VERIFICATION_TOKEN_INVALID"));
     }
 
+    @ExceptionHandler(ChangePasswordException.class)
+    public ResponseEntity<ApiResponse<Void>> handleChangePassword(ChangePasswordException ex)
+    {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(ApiResponse.fail(ex.getMessage(), "WRONG_PASSWORD"));
+    }
+
+    @ExceptionHandler(AppException.class)
+    public ResponseEntity<ApiResponse<Void>> handleApp(AppException ex)
+    {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(ApiResponse.fail(ex.getMessage(), "INVALID_FILE"));
+    }
 }

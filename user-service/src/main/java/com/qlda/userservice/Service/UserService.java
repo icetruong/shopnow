@@ -1,11 +1,15 @@
 package com.qlda.userservice.Service;
 
 import com.qlda.userservice.DTO.Request.Auth.*;
+import com.qlda.userservice.DTO.Request.User.ChangePasswordRequest;
+import com.qlda.userservice.DTO.Request.User.UserRequest;
 import com.qlda.userservice.DTO.Response.Auth.ForgotPasswordResponse;
 import com.qlda.userservice.DTO.Response.Auth.RegisterResponse;
 import com.qlda.userservice.DTO.Response.Auth.TokenResponse;
+import com.qlda.userservice.DTO.Response.User.UserResponse;
 import com.qlda.userservice.Entity.RefreshToken;
 import com.qlda.userservice.Entity.User;
+import com.qlda.userservice.Enum.UserProvider;
 import com.qlda.userservice.Exception.*;
 import com.qlda.userservice.Repository.RefreshTokenRepo;
 import com.qlda.userservice.Repository.UserRepo;
@@ -22,6 +26,7 @@ import org.springframework.stereotype.Service;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Objects;
 import java.util.UUID;
 
 @Service
@@ -176,6 +181,69 @@ public class UserService {
                 .orElseThrow(() -> new ResourceNotFoundException("User not found"));
 
         user.setEmailVerified(true);
+        userRepo.save(user);
+    }
+
+    public UserResponse getUser(String email)
+    {
+        User user = userRepo.findByEmail(email)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+
+        return toUserResponse(user);
+    }
+
+    private UserResponse toUserResponse(User user)
+    {
+        return new UserResponse(
+                user.getId().toString(),
+                user.getEmail(),
+                user.getFullName(),
+                user.getPhone(),
+                user.getAvatarUrl(),
+                user.getRole(),
+                user.getProvider(),
+                user.getEmailVerified(),
+                user.getIsActive(),
+                user.getCreatedAt()
+        );
+    }
+
+    public UserResponse updateUser(UserRequest userRequest, String email) {
+        User user = userRepo.findByEmail(email)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+
+        user.setPhone(userRequest.getPhone());
+        user.setFullName(userRequest.getFullName());
+
+        User save = userRepo.save(user);
+
+        return toUserResponse(save);
+    }
+
+    public void saveAvatarUrl(String avatarUrl, String email)
+    {
+        User user = userRepo.findByEmail(email)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+
+        user.setAvatarUrl(avatarUrl);
+
+        userRepo.save(user);
+
+    }
+
+    public void changePassword(ChangePasswordRequest request, String email)
+    {
+        User user = userRepo.findByEmail(email)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+
+        if(user.getProvider() != UserProvider.LOCAL)
+            throw new ChangePasswordException("Tài khoản đăng nhập qua Google/Facebook không thể đổi mật khẩu");
+
+        if(!passwordEncoder.matches(request.getCurrentPassword(), user.getPasswordHash()))
+            throw new ChangePasswordException("Mật khẩu hiện tại không đúng.");
+
+        user.setPasswordHash(passwordEncoder.encode(request.getNewPassword()));
+
         userRepo.save(user);
     }
 }
