@@ -1,4 +1,9 @@
 package com.qlda.userservice.Repository;
 
-public interface RefreshTokenRepo {
+import com.qlda.userservice.Entity.RefreshToken;
+import org.springframework.data.jpa.repository.JpaRepository;
+
+import java.util.UUID;
+
+public interface RefreshTokenRepo extends JpaRepository<RefreshToken, UUID> {
 }

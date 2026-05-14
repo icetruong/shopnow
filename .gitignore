@@ -33,3 +33,5 @@ build/
 .vscode/
 
 Project_context.md
+
+*.pem
