@@ -47,10 +47,12 @@ public class User {
     @Column(name = "avatar_url", columnDefinition = "TEXT")
     private String avatarUrl;
 
+    @Enumerated(EnumType.STRING)
     @Column(name = "role", nullable = false, length = 20)
     @Builder.Default
     private UserRole role = UserRole.ROLE_USER;
 
+    @Enumerated(EnumType.STRING)
     @Column(name = "provider", nullable = false, length = 20)
     @Builder.Default
     private UserProvider provider = UserProvider.LOCAL;

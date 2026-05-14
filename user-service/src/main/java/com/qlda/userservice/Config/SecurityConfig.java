@@ -24,6 +24,7 @@ public class SecurityConfig {
     private final CustomOAuth2UserService customOAuth2UserService;
     private final OAuth2SuccessHandler oAuth2SuccessHandler;
     private final OAuth2FailureHandler oAuth2FailureHandler;
+    private final InternalTokenFilter internalTokenFilter;
 
 
     @Bean
@@ -35,6 +36,7 @@ public class SecurityConfig {
                         .sessionCreationPolicy(SessionCreationPolicy.IF_REQUIRED)
                 )
                 .authorizeHttpRequests(auth -> auth
+                        .requestMatchers("/api/v1/internal/**").permitAll()
                         .requestMatchers("/api/v1/auth/register",
                                 "/api/v1/auth/login",
                                 "/api/v1/auth/refresh",
@@ -43,6 +45,7 @@ public class SecurityConfig {
                                 "/api/v1/auth/verify-email"
                         ).permitAll()
                         .requestMatchers("/uploads/**").permitAll()
+                        .requestMatchers("/admin/**").hasRole("ADMIN")
                         .anyRequest().authenticated()
                 )
                 .oauth2ResourceServer(oauth2 -> oauth2
@@ -61,6 +64,7 @@ public class SecurityConfig {
                                 .failureHandler(oAuth2FailureHandler)
                         )
                 .addFilterAfter(jwtBlacklistFilter, BearerTokenAuthenticationFilter.class)
+                .addFilterBefore(internalTokenFilter, BearerTokenAuthenticationFilter.class)
                 .build();
     }
 

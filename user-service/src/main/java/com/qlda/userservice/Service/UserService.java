@@ -2,7 +2,9 @@ package com.qlda.userservice.Service;
 
 import com.qlda.userservice.DTO.Request.Auth.*;
 import com.qlda.userservice.DTO.Request.User.ChangePasswordRequest;
+import com.qlda.userservice.DTO.Request.User.ChangeRule;
 import com.qlda.userservice.DTO.Request.User.UserRequest;
+import com.qlda.userservice.DTO.Response.Admin.UserAdminResponse;
 import com.qlda.userservice.DTO.Response.Auth.ForgotPasswordResponse;
 import com.qlda.userservice.DTO.Response.Auth.RegisterResponse;
 import com.qlda.userservice.DTO.Response.Auth.TokenResponse;
@@ -10,11 +12,17 @@ import com.qlda.userservice.DTO.Response.User.UserResponse;
 import com.qlda.userservice.Entity.RefreshToken;
 import com.qlda.userservice.Entity.User;
 import com.qlda.userservice.Enum.UserProvider;
+import com.qlda.userservice.Enum.UserRole;
 import com.qlda.userservice.Exception.*;
 import com.qlda.userservice.Repository.RefreshTokenRepo;
 import com.qlda.userservice.Repository.UserRepo;
+import com.qlda.userservice.Util.UserSpecification;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
@@ -246,4 +254,75 @@ public class UserService {
 
         userRepo.save(user);
     }
+
+    public UserAdminResponse getAllUserForAdmin(int page, int size, String sort, String direction, String keyword, String provider, Boolean isActive) {
+
+        Specification<User> spec = Specification.where(UserSpecification.hasKeyword(keyword))
+                .and(UserSpecification.isActive(isActive))
+                .and(UserSpecification.hasProvider(provider));
+        Page<User> users;
+
+        if(direction.equals("ASC"))
+        {
+            users = userRepo.findAll(spec, PageRequest.of(page, size, Sort.by(Sort.Direction.ASC, sort)));
+        }
+        else
+            users = userRepo.findAll(spec, PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, sort)));
+
+        List<UserResponse> list = users.stream()
+                .map(this::toUserResponse)
+                .toList();
+
+        return new UserAdminResponse(
+                list,
+                users.getNumber(),
+                users.getSize(),
+                users.getTotalElements(),
+                users.getTotalPages(),
+                users.isLast()
+        );
+    }
+
+
+    public UserResponse getUserById(UUID id) {
+        User user = userRepo.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+
+        return toUserResponse(user);
+    }
+
+    public void banUser(UUID id)
+    {
+        User user = userRepo.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+
+        user.setIsActive(false);
+
+        userRepo.save(user);
+    }
+
+    public void unbanUser(UUID id)
+    {
+        User user = userRepo.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+
+        user.setIsActive(true);
+
+        userRepo.save(user);
+    }
+
+    public void updateRule(UUID id, ChangeRule role)
+    {
+        User user = userRepo.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+
+        if(role.getRole().equals(UserRole.ROLE_USER.name()))
+            user.setRole(UserRole.ROLE_USER);
+        else
+            user.setRole(UserRole.ROLE_ADMIN);
+
+        userRepo.save(user);
+    }
+
+    
 }

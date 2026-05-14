@@ -568,7 +568,6 @@ size     = 20         (default 20, max 100)
 sort     = createdAt  (createdAt | fullName | email)
 direction= DESC       (ASC | DESC)
 keyword  = "nguyen"   (tìm theo email hoặc fullName)
-role     = ROLE_USER  (filter theo role)
 provider = LOCAL      (filter theo provider)
 isActive = true       (filter theo trạng thái)
 ```
