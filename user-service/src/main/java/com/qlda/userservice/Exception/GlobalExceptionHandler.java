@@ -93,4 +93,11 @@ public class GlobalExceptionHandler {
                 .body(ApiResponse.fail(ex.getMessage(), "RESET_TOKEN_INVALID"));
     }
 
+    @ExceptionHandler(VerifyTokenInvalidException.class)
+    public ResponseEntity<ApiResponse<Void>> handleVerifyTokenInvalid(VerifyTokenInvalidException ex)
+    {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(ApiResponse.fail(ex.getMessage(), "VERIFICATION_TOKEN_INVALID"));
+    }
+
 }

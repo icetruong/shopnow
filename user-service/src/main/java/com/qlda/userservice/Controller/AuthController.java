@@ -76,4 +76,14 @@ public class AuthController {
                 null
         ));
     }
+
+    @GetMapping("/verify-email")
+    public ResponseEntity<ApiResponse<Void>> verifyEmail(@RequestParam String token)
+    {
+        userService.verifyEmail(token);
+        return ResponseEntity.ok(ApiResponse.success(
+                "Email đã được xác thực thành công.",
+                null
+        ));
+    }
 }

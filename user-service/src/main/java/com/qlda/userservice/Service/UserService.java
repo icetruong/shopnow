@@ -6,10 +6,7 @@ import com.qlda.userservice.DTO.Response.Auth.RegisterResponse;
 import com.qlda.userservice.DTO.Response.Auth.TokenResponse;
 import com.qlda.userservice.Entity.RefreshToken;
 import com.qlda.userservice.Entity.User;
-import com.qlda.userservice.Exception.EmailExistException;
-import com.qlda.userservice.Exception.InvalidTokenException;
-import com.qlda.userservice.Exception.ResourceNotFoundException;
-import com.qlda.userservice.Exception.TokenResetPasswordException;
+import com.qlda.userservice.Exception.*;
 import com.qlda.userservice.Repository.RefreshTokenRepo;
 import com.qlda.userservice.Repository.UserRepo;
 import lombok.RequiredArgsConstructor;
@@ -37,6 +34,7 @@ public class UserService {
     private final RefreshTokenRepo refreshTokenRepo;
     private final TokenBlacklistService tokenBlacklistService;
     private final TokenResetPasswordService tokenResetPasswordService;
+    private final TokenVerifyEmailService tokenVerifyEmailService;
 
     @Value("${jwt.refresh-token-expiry}")
     private long refreshTokenExpiry;
@@ -60,6 +58,10 @@ public class UserService {
                 .build();
 
         User save = userRepo.save(user);
+
+        String token = jwtService.generateRandomToken();
+
+        tokenVerifyEmailService.verifyToken(token, save.getId().toString());
 
         return new RegisterResponse(save.getId(), save.getEmail());
     }
@@ -160,6 +162,20 @@ public class UserService {
                 .orElseThrow(() -> new ResourceNotFoundException("User not found"));
 
         user.setPasswordHash(passwordEncoder.encode(request.getNewPassword()));
+        userRepo.save(user);
+    }
+
+    public void verifyEmail(String token)
+    {
+        String userId = tokenVerifyEmailService.getUserIdVifyToken(token);
+
+        if(userId == null)
+            throw new VerifyTokenInvalidException("Link xác thực không hợp lệ hoặc đã hết hạn.");
+
+        User user = userRepo.findById(UUID.fromString(userId))
+                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+
+        user.setEmailVerified(true);
         userRepo.save(user);
     }
 }
