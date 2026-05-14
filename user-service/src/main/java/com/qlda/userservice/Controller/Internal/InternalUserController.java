@@ -22,13 +22,13 @@ public class InternalUserController {
     @GetMapping("/users/{id}")
     public ResponseEntity<InternalUserResponse> getUser(@PathVariable UUID id)
     {
-
+        return ResponseEntity.ok(userService.getUser(id));
     }
 
-    @GetMapping("/users/{userId}/exists")
+    @GetMapping("/users/{id}/exists")
     public ResponseEntity<InternalExistUserResponse> checkUser(@PathVariable UUID id)
     {
-
+        return ResponseEntity.ok(userService.checkUser(id));
     }
 
 }

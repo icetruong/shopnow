@@ -4,13 +4,17 @@ import com.qlda.userservice.DTO.Request.Auth.*;
 import com.qlda.userservice.DTO.Request.User.ChangePasswordRequest;
 import com.qlda.userservice.DTO.Request.User.ChangeRule;
 import com.qlda.userservice.DTO.Request.User.UserRequest;
+import com.qlda.userservice.DTO.Response.Address.AddressInternalResponse;
 import com.qlda.userservice.DTO.Response.Admin.UserAdminResponse;
 import com.qlda.userservice.DTO.Response.Auth.ForgotPasswordResponse;
 import com.qlda.userservice.DTO.Response.Auth.RegisterResponse;
 import com.qlda.userservice.DTO.Response.Auth.TokenResponse;
+import com.qlda.userservice.DTO.Response.User.InternalExistUserResponse;
+import com.qlda.userservice.DTO.Response.User.InternalUserResponse;
 import com.qlda.userservice.DTO.Response.User.UserResponse;
 import com.qlda.userservice.Entity.RefreshToken;
 import com.qlda.userservice.Entity.User;
+import com.qlda.userservice.Entity.UserAddress;
 import com.qlda.userservice.Enum.UserProvider;
 import com.qlda.userservice.Enum.UserRole;
 import com.qlda.userservice.Exception.*;
@@ -324,5 +328,42 @@ public class UserService {
         userRepo.save(user);
     }
 
-    
+    public InternalUserResponse getUser(UUID id)
+    {
+        User user = userRepo.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+
+        AddressInternalResponse addressInternalResponse = new AddressInternalResponse();
+        for(UserAddress userAddress : user.getAddresses())
+        {
+            if(userAddress.getIsDefault())
+            {
+                 addressInternalResponse= new AddressInternalResponse(
+                        userAddress.getFullName(),
+                        userAddress.getPhone(),
+                        userAddress.getProvince(),
+                        userAddress.getDistrict(),
+                        userAddress.getWard(),
+                        userAddress.getStreetDetail()
+                );
+                 break;
+            }
+        }
+
+        return new InternalUserResponse(
+                user.getId().toString(),
+                user.getFullName(),
+                user.getEmail(),
+                user.getPhone(),
+                addressInternalResponse
+        );
+    }
+
+    public InternalExistUserResponse checkUser(UUID id)
+    {
+        User user = userRepo.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+
+        return new InternalExistUserResponse(true,user.getIsActive());
+    }
 }
