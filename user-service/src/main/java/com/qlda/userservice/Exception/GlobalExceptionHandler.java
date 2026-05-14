@@ -86,4 +86,11 @@ public class GlobalExceptionHandler {
                 .body(ApiResponse.fail(ex.getMessage(), "REFRESH_TOKEN_INVALID"));
     }
 
+    @ExceptionHandler(TokenResetPasswordException.class)
+    public ResponseEntity<ApiResponse<Void>> handleExpiredTokenResetPassword(TokenResetPasswordException ex)
+    {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(ApiResponse.fail(ex.getMessage(), "RESET_TOKEN_INVALID"));
+    }
+
 }

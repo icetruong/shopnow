@@ -178,11 +178,15 @@ Gửi email đặt lại mật khẩu.
 }
 ```
 
-**Response 200** *(luôn trả 200 dù email tồn tại hay không — tránh email enumeration)*
+**Response 200** **
 ```json
 {
   "success": true,
-  "message": "Nếu email tồn tại, chúng tôi đã gửi hướng dẫn đặt lại mật khẩu."
+  "message": "Email có thể đổi mật khẩu."
+  "data": {
+    "token": "reset-token-uuid",
+    "expiresIn": 900
+  }
 }
 ```
 
@@ -191,12 +195,12 @@ Gửi email đặt lại mật khẩu.
 ---
 
 ### POST /auth/reset-password
-Đặt lại mật khẩu bằng reset token từ email.
+Đặt lại mật khẩu bằng reset token.
 
 **Request Body**
 ```json
 {
-  "token":       "reset-token-uuid-từ-email",
+  "token":       "reset-token-uuid",
   "newPassword": "NewPassword456!"
 }
 ```

@@ -1,8 +1,7 @@
 package com.qlda.userservice.Service;
 
-import com.qlda.userservice.DTO.Request.Auth.LoginRequest;
-import com.qlda.userservice.DTO.Request.Auth.RefreshTokenRequest;
-import com.qlda.userservice.DTO.Request.Auth.RegisterRequest;
+import com.qlda.userservice.DTO.Request.Auth.*;
+import com.qlda.userservice.DTO.Response.Auth.ForgotPasswordResponse;
 import com.qlda.userservice.DTO.Response.Auth.RegisterResponse;
 import com.qlda.userservice.DTO.Response.Auth.TokenResponse;
 import com.qlda.userservice.Entity.RefreshToken;
@@ -10,6 +9,7 @@ import com.qlda.userservice.Entity.User;
 import com.qlda.userservice.Exception.EmailExistException;
 import com.qlda.userservice.Exception.InvalidTokenException;
 import com.qlda.userservice.Exception.ResourceNotFoundException;
+import com.qlda.userservice.Exception.TokenResetPasswordException;
 import com.qlda.userservice.Repository.RefreshTokenRepo;
 import com.qlda.userservice.Repository.UserRepo;
 import lombok.RequiredArgsConstructor;
@@ -25,6 +25,7 @@ import org.springframework.stereotype.Service;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
@@ -35,12 +36,16 @@ public class UserService {
     private final JWTService jwtService;
     private final RefreshTokenRepo refreshTokenRepo;
     private final TokenBlacklistService tokenBlacklistService;
+    private final TokenResetPasswordService tokenResetPasswordService;
 
     @Value("${jwt.refresh-token-expiry}")
     private long refreshTokenExpiry;
 
     @Value("${jwt.access-token-expiry}")
     private long accessTokenExpiry;
+
+    @Value("${jwt.reset-password-token-expiry}")
+    private long resetPasswordTokenExpiry;
 
     public RegisterResponse register(RegisterRequest request)
     {
@@ -72,7 +77,7 @@ public class UserService {
                 .orElseThrow(() -> new ResourceNotFoundException("user not found" + authentication.getName()));
 
         String token = jwtService.generateAccessToken(authentication);
-        String refreshToken = jwtService.generateRefreshToken();
+        String refreshToken = jwtService.generateRandomToken();
 
         RefreshToken refreshTokenEntity = RefreshToken.builder()
                 .user(user)
@@ -107,7 +112,7 @@ public class UserService {
         refreshTokenRepo.delete(refreshTokenEntity);
 
         String token = jwtService.generateAccessToken(authentication);
-        String refreshToken = jwtService.generateRefreshToken();
+        String refreshToken = jwtService.generateRandomToken();
 
         RefreshToken new_refreshTokenEntity = RefreshToken.builder()
                 .user(user)
@@ -132,5 +137,29 @@ public class UserService {
         User user = userRepo.findByEmail(authentication.getName())
                 .orElseThrow(() -> new ResourceNotFoundException("User not found"));
         refreshTokenRepo.deleteAllByUser(user);
+    }
+
+    public ForgotPasswordResponse forgotPassword(ForgotPasswordRequest request)
+    {
+        User user = userRepo.findByEmail(request.getEmail())
+                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+
+        String token = jwtService.generateRandomToken();
+        tokenResetPasswordService.resetPassword(token, Instant.now().plusSeconds(resetPasswordTokenExpiry), user.getId().toString());
+
+        return new ForgotPasswordResponse(token, resetPasswordTokenExpiry);
+    }
+
+    public void resetPassword(ResetPasswordRequest request) {
+        String userId = tokenResetPasswordService.getUserIdResetPassword(request.getToken());
+
+        if(userId == null)
+            throw new TokenResetPasswordException("Link đặt lại mật khẩu không hợp lệ hoặc đã hết hạn.");
+
+        User user = userRepo.findById(UUID.fromString(userId))
+                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+
+        user.setPasswordHash(passwordEncoder.encode(request.getNewPassword()));
+        userRepo.save(user);
     }
 }

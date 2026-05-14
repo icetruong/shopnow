@@ -1,8 +1,7 @@
 package com.qlda.userservice.Controller;
 
-import com.qlda.userservice.DTO.Request.Auth.LoginRequest;
-import com.qlda.userservice.DTO.Request.Auth.RefreshTokenRequest;
-import com.qlda.userservice.DTO.Request.Auth.RegisterRequest;
+import com.qlda.userservice.DTO.Request.Auth.*;
+import com.qlda.userservice.DTO.Response.Auth.ForgotPasswordResponse;
 import com.qlda.userservice.DTO.Response.Auth.RegisterResponse;
 import com.qlda.userservice.DTO.Response.Auth.TokenResponse;
 import com.qlda.userservice.DTO.Response.Common.ApiResponse;
@@ -40,7 +39,7 @@ public class AuthController {
         ));
     }
 
-    @GetMapping("/refresh")
+    @PostMapping("/refresh")
     public ResponseEntity<ApiResponse<TokenResponse>> refresh(@RequestBody RefreshTokenRequest request)
     {
         return ResponseEntity.ok(ApiResponse.success(
@@ -49,12 +48,32 @@ public class AuthController {
         ));
     }
 
-    public ResponseEntity<ApiResponse<Void>> logout(@RequestBody RefreshTokenRequest request, Authentication authentication)
+    @PostMapping("/logout")
+    public ResponseEntity<ApiResponse<Void>> logout(Authentication authentication)
     {
         userService.logout(authentication);
         return ResponseEntity.ok(ApiResponse.success(
                 "Đăng xuất thành công", null
 
+        ));
+    }
+
+    @PostMapping("/forgot-password")
+    public ResponseEntity<ApiResponse<ForgotPasswordResponse>> forgotPassword(@RequestBody ForgotPasswordRequest request)
+    {
+        return ResponseEntity.ok(ApiResponse.success(
+                "Email có thể đổi mật khẩu.",
+                userService.forgotPassword(request)
+        ));
+    }
+
+    @PostMapping("/reset-password")
+    public ResponseEntity<ApiResponse<Void>> resetPassword(@RequestBody ResetPasswordRequest request)
+    {
+        userService.resetPassword(request);
+        return ResponseEntity.ok(ApiResponse.success(
+                "Mật khẩu đã được đặt lại thành công. Vui lòng đăng nhập lại",
+                null
         ));
     }
 }

@@ -41,7 +41,7 @@ public class JWTService {
         return jwtEncoder.encode(JwtEncoderParameters.from(claims)).getTokenValue();
     }
 
-    public String generateRefreshToken() {
+    public String generateRandomToken() {
         return UUID.randomUUID().toString();
     }
 
