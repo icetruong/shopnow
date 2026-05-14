@@ -1,12 +1,14 @@
 package com.qlda.userservice.Service;
 
 import com.qlda.userservice.DTO.Request.Auth.LoginRequest;
+import com.qlda.userservice.DTO.Request.Auth.RefreshTokenRequest;
 import com.qlda.userservice.DTO.Request.Auth.RegisterRequest;
-import com.qlda.userservice.DTO.Response.Auth.LoginResponse;
 import com.qlda.userservice.DTO.Response.Auth.RegisterResponse;
+import com.qlda.userservice.DTO.Response.Auth.TokenResponse;
 import com.qlda.userservice.Entity.RefreshToken;
 import com.qlda.userservice.Entity.User;
 import com.qlda.userservice.Exception.EmailExistException;
+import com.qlda.userservice.Exception.InvalidTokenException;
 import com.qlda.userservice.Exception.ResourceNotFoundException;
 import com.qlda.userservice.Repository.RefreshTokenRepo;
 import com.qlda.userservice.Repository.UserRepo;
@@ -52,7 +54,7 @@ public class UserService {
         return new RegisterResponse(save.getId(), save.getEmail());
     }
 
-    public LoginResponse login(LoginRequest request)
+    public TokenResponse login(LoginRequest request)
     {
         Authentication authentication = authenticationManager.authenticate(
                 new UsernamePasswordAuthenticationToken(
@@ -75,6 +77,37 @@ public class UserService {
 
         refreshTokenRepo.save(refreshTokenEntity);
 
-        return new LoginResponse(token, refreshToken, "Bearer", accessTokenExpiry);
+        return new TokenResponse(token, refreshToken, "Bearer", accessTokenExpiry);
+    }
+
+    public TokenResponse getTokenByRefreshToken(RefreshTokenRequest request, Authentication authentication)
+    {
+        RefreshToken refreshTokenEntity = refreshTokenRepo.findByTokenAndUser_Email(request.getRefreshToken(), authentication.getName())
+                .orElseThrow(() -> new ResourceNotFoundException("refreshToken không hợp lệ" + request.getRefreshToken()));
+
+        if(refreshTokenEntity.isExpired())
+        {
+            refreshTokenRepo.delete(refreshTokenEntity);
+            throw new InvalidTokenException("Phiên đăng nhập hết hạn. Vui lòng đăng nhập lại.");
+        }
+
+        User user = refreshTokenEntity.getUser();
+
+        refreshTokenRepo.delete(refreshTokenEntity);
+
+        String token = jwtService.generateAccessToken(authentication);
+        String refreshToken = jwtService.generateRefreshToken();
+
+        RefreshToken new_refreshTokenEntity = RefreshToken.builder()
+                .user(user)
+                .token(refreshToken)
+                .expiresAt(LocalDateTime.now().plusSeconds(refreshTokenExpiry))
+                .build();
+
+        refreshTokenRepo.save(new_refreshTokenEntity);
+
+        return new TokenResponse(token, refreshToken, "Bearer", accessTokenExpiry);
+
+
     }
 }

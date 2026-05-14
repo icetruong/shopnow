@@ -79,4 +79,11 @@ public class GlobalExceptionHandler {
                 .body(ApiResponse.fail("Lỗi hệ thống, vui lòng thử lại sau", "INTERNAL_ERROR"));
     }
 
+    @ExceptionHandler(InvalidTokenException.class)
+    public ResponseEntity<ApiResponse<Void>> handleInvalidToken(InvalidTokenException ex)
+    {
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                .body(ApiResponse.fail(ex.getMessage(), "REFRESH_TOKEN_INVALID"));
+    }
+
 }
