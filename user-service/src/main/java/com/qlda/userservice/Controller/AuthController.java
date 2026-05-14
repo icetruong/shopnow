@@ -1,6 +1,8 @@
 package com.qlda.userservice.Controller;
 
+import com.qlda.userservice.DTO.Request.Auth.LoginRequest;
 import com.qlda.userservice.DTO.Request.Auth.RegisterRequest;
+import com.qlda.userservice.DTO.Response.Auth.LoginResponse;
 import com.qlda.userservice.DTO.Response.Auth.RegisterResponse;
 import com.qlda.userservice.DTO.Response.Common.ApiResponse;
 import com.qlda.userservice.Service.UserService;
@@ -28,5 +30,13 @@ public class AuthController {
                         "Đăng ký thành công. Vui lòng kiểm tra email để xác thực tài khoản",
                         userService.register(request)
                 ));
+    }
+
+    public ResponseEntity<ApiResponse<LoginResponse>> login(@RequestBody LoginRequest request)
+    {
+        return ResponseEntity.ok(ApiResponse.success(
+                "login thành công",
+                userService.login(request)
+        ));
     }
 }
