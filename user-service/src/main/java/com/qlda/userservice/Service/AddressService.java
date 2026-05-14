@@ -34,6 +34,8 @@ public class AddressService {
                 .orElseThrow(() -> new ResourceNotFoundException("User not found"));
         if (user.getPhone() == null)
             throw new AppException("Vui lòng cập nhật số điện thoại trước khi thêm địa chỉ");
+        if (userAddressRepo.countByUser_Email(email) >= 5)
+            throw new AppException("Mỗi tài khoản chỉ được thêm tối đa 5 địa chỉ");
 
         if(request.isDefault())
             setAllNotDefault(email);

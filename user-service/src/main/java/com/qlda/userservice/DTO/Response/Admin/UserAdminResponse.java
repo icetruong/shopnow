@@ -18,5 +18,5 @@ public class UserAdminResponse {
     int size;
     long totalElements;
     int totalPages;
-    boolean isLast;
+    Boolean isLast;
 }

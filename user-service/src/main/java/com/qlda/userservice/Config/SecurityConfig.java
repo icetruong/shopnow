@@ -45,7 +45,7 @@ public class SecurityConfig {
                                 "/api/v1/auth/verify-email"
                         ).permitAll()
                         .requestMatchers("/uploads/**").permitAll()
-                        .requestMatchers("/admin/**").hasRole("ADMIN")
+                        .requestMatchers("/api/v1/admin/**").hasRole("ADMIN")
                         .anyRequest().authenticated()
                 )
                 .oauth2ResourceServer(oauth2 -> oauth2

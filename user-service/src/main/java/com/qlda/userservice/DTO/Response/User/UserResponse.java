@@ -22,6 +22,6 @@ public class UserResponse {
     private UserRole role;
     private UserProvider provider;
     private boolean emailVerified;
-    private boolean isActive;
+    private Boolean isActive;
     private LocalDateTime createdAt;
 }

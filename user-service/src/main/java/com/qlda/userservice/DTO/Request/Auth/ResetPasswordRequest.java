@@ -18,7 +18,7 @@ public class ResetPasswordRequest {
     @NotBlank(message = "Password must not be blank")
     @Size(min = 8, max = 32, message = "Password must be between 8 and 32 characters")
     @Pattern(
-            regexp = "^(?=.*[A-Za-z])(?=.*\\d).+$",
+            regexp = "^(?=.*[A-Z])(?=.*\\d)(?=.*[!@#$%^&*()_+\\-=\\[\\]{};':\"\\\\|,.<>\\/?]).+$",
             message = "Password must contain at least 1 letter and 1 number"
     )
     private String newPassword;

@@ -7,6 +7,7 @@ import com.qlda.userservice.DTO.Response.User.AvatarResponse;
 import com.qlda.userservice.DTO.Response.User.UserResponse;
 import com.qlda.userservice.Service.FileStorageService;
 import com.qlda.userservice.Service.UserService;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -32,7 +33,7 @@ public class UserController {
     }
 
     @PutMapping("/me")
-    public ResponseEntity<ApiResponse<UserResponse>> updateUser(@RequestBody UserRequest userRequest, Authentication authentication)
+    public ResponseEntity<ApiResponse<UserResponse>> updateUser(@Valid @RequestBody UserRequest userRequest, Authentication authentication)
     {
         return ResponseEntity.ok(ApiResponse.success(
                 "Cập nhập thông tin thành công",
@@ -40,7 +41,7 @@ public class UserController {
         ));
     }
 
-    @PostMapping(value = "/avatar", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @PostMapping(value = "/me/avatar", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<ApiResponse<AvatarResponse>> updateAvatar(@RequestParam("file") MultipartFile file, Authentication authentication)
     {
         String avatarUrl = fileStorageService.saveAvatar(file);
@@ -54,7 +55,7 @@ public class UserController {
 
     @PutMapping("/me/change-password")
     public ResponseEntity<ApiResponse<Void>> changePassword(
-            @RequestBody ChangePasswordRequest request, Authentication authentication) {
+            @Valid @RequestBody ChangePasswordRequest request, Authentication authentication) {
         userService.changePassword(request, authentication.getName());
         return ResponseEntity.ok(ApiResponse.success("Đổi mật khẩu thành công", null));
     }

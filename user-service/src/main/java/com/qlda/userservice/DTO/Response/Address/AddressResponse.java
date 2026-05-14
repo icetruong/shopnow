@@ -17,5 +17,5 @@ public class AddressResponse {
     private String district;
     private String ward;
     private String streetDetail;
-    private boolean isDefault;
+    private Boolean isDefault;
 }

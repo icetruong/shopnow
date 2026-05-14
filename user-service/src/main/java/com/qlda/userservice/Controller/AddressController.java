@@ -4,6 +4,7 @@ import com.qlda.userservice.DTO.Request.Address.AddressRequest;
 import com.qlda.userservice.DTO.Response.Address.AddressResponse;
 import com.qlda.userservice.DTO.Response.Common.ApiResponse;
 import com.qlda.userservice.Service.AddressService;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -30,7 +31,7 @@ public class AddressController {
     }
 
     @PostMapping
-    public ResponseEntity<ApiResponse<AddressResponse>> addAddress(@RequestBody AddressRequest request, Authentication authentication)
+    public ResponseEntity<ApiResponse<AddressResponse>> addAddress(@Valid @RequestBody AddressRequest request, Authentication authentication)
     {
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(ApiResponse.success(
@@ -40,7 +41,7 @@ public class AddressController {
     }
 
     @PutMapping("/{id}")
-    public ResponseEntity<ApiResponse<AddressResponse>> updateAddress(@PathVariable UUID id, @RequestBody AddressRequest request, Authentication authentication)
+    public ResponseEntity<ApiResponse<AddressResponse>> updateAddress(@PathVariable UUID id, @Valid @RequestBody AddressRequest request, Authentication authentication)
     {
         return ResponseEntity.ok(ApiResponse.success(
                 "Cập nhập thành công",

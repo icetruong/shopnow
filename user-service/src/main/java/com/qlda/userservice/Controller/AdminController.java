@@ -5,6 +5,7 @@ import com.qlda.userservice.DTO.Response.Admin.UserAdminResponse;
 import com.qlda.userservice.DTO.Response.Common.ApiResponse;
 import com.qlda.userservice.DTO.Response.User.UserResponse;
 import com.qlda.userservice.Service.UserService;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -13,7 +14,7 @@ import java.util.UUID;
 
 @RestController
 @RequiredArgsConstructor
-@RequestMapping("/admin/users")
+@RequestMapping("/api/v1/admin/users")
 public class AdminController {
 
     private final UserService userService;
@@ -22,8 +23,8 @@ public class AdminController {
     public ResponseEntity<ApiResponse<UserAdminResponse>> getAllUsers(
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "10") int size,
-            @RequestParam String sort,
-            @RequestParam String direction,
+            @RequestParam(defaultValue = "createdAt") String sort,
+            @RequestParam(defaultValue = "DESC") String direction,
             @RequestParam(required = false) String keyword,
             @RequestParam(required = false) String provider,
             @RequestParam(required = false) Boolean isActive
@@ -73,7 +74,7 @@ public class AdminController {
     }
 
     @PatchMapping("/{id}/role")
-    public ResponseEntity<ApiResponse<UserResponse>> changeRole(@PathVariable UUID id, @RequestBody ChangeRule rule)
+    public ResponseEntity<ApiResponse<UserResponse>> changeRole(@PathVariable UUID id,@Valid @RequestBody ChangeRule rule)
     {
         userService.updateRule(id, rule);
         return ResponseEntity.ok(

@@ -13,4 +13,6 @@ public interface UserAddressRepo extends JpaRepository<UserAddress, UUID> {
 
     long deleteByIdAndUser_Email(UUID id, String email);
 
+    long countByUser_Email(String email);
+
 }

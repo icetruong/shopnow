@@ -39,13 +39,13 @@ Authorization: Bearer {accessToken}
 - `email`: không được trống, đúng định dạng email, chưa tồn tại trong DB
 - `password`: 8–32 ký tự, có ít nhất 1 chữ hoa, 1 số, 1 ký tự đặc biệt
 - `fullName`: không được trống, 2–50 ký tự
-- `phone`: đúng định dạng số VN (tùy chọn)
+- `phone`: định dạng số VN (tùy chọn — không bắt buộc)
 
 **Response 201**
 ```json
 {
   "success": true,
-  "message": "Đăng ký thành công. Vui lòng kiểm tra email để xác thực tài khoản.",
+  "message": "Đăng ký thành công. Vui lòng kiểm tra email để xác thực tài khoản",
   "data": {
     "userId": "550e8400-e29b-41d4-a716-446655440000",
     "email":  "user@example.com"
@@ -56,9 +56,9 @@ Authorization: Bearer {accessToken}
 **Response 409** — email đã tồn tại
 ```json
 {
-  "success": false,
-  "code":    "EMAIL_ALREADY_EXISTS",
-  "message": "Email này đã được đăng ký."
+  "success":   false,
+  "errorCode": "EMAIL_ALREADY_EXISTS",
+  "message":   "Email này đã được đăng ký"
 }
 ```
 
@@ -77,10 +77,15 @@ Authorization: Bearer {accessToken}
 }
 ```
 
+**Validation**
+- `email`: không được trống, đúng định dạng email
+- `password`: không được trống, 8–32 ký tự, có ít nhất 1 chữ hoa, 1 số, 1 ký tự đặc biệt
+
 **Response 200**
 ```json
 {
   "success": true,
+  "message": "login thành công",
   "data": {
     "accessToken":  "eyJhbGciOiJIUzI1NiJ9...",
     "refreshToken": "eyJhbGciOiJIUzI1NiJ9...",
@@ -93,20 +98,22 @@ Authorization: Bearer {accessToken}
 **Response 401** — sai email hoặc password
 ```json
 {
-  "success": false,
-  "code":    "INVALID_CREDENTIALS",
-  "message": "Email hoặc mật khẩu không đúng."
+  "success":   false,
+  "errorCode": "INVALID_CREDENTIALS",
+  "message":   "Email hoặc mật khẩu không đúng"
 }
 ```
 
 **Response 403** — tài khoản bị khoá
 ```json
 {
-  "success": false,
-  "code":    "ACCOUNT_DISABLED",
-  "message": "Tài khoản của bạn đã bị khoá. Vui lòng liên hệ hỗ trợ."
+  "success":   false,
+  "errorCode": "ACCOUNT_DISABLED",
+  "message":   "Tài khoản đã bị vô hiệu hóa"
 }
 ```
+
+**Side effect:** Cập nhật `lastLoginAt` của user.
 
 ---
 
@@ -116,7 +123,7 @@ Lấy access token mới bằng refresh token (Refresh Token Rotation — refres
 **Request Body**
 ```json
 {
-  "refreshToken": "eyJhbGciOiJIUzI1NiJ9..."
+  "refreshToken": "uuid-string"
 }
 ```
 
@@ -124,47 +131,43 @@ Lấy access token mới bằng refresh token (Refresh Token Rotation — refres
 ```json
 {
   "success": true,
+  "message": "Dùng Refresh token đổi lấy token thành công",
   "data": {
     "accessToken":  "eyJhbGciOiJIUzI1NiJ9...",
-    "refreshToken": "eyJhbGciOiJIUzI1NiJ9...",
+    "refreshToken": "uuid-string-moi",
     "tokenType":    "Bearer",
     "expiresIn":    900
   }
 }
 ```
 
-**Response 401** — refresh token hết hạn hoặc đã bị dùng
+**Response 401** — refresh token hết hạn hoặc không hợp lệ
 ```json
 {
-  "success": false,
-  "code":    "REFRESH_TOKEN_INVALID",
-  "message": "Phiên đăng nhập hết hạn. Vui lòng đăng nhập lại."
+  "success":   false,
+  "errorCode": "REFRESH_TOKEN_INVALID",
+  "message":   "Phiên đăng nhập hết hạn. Vui lòng đăng nhập lại."
 }
 ```
 
 ---
 
 ### POST /auth/logout
-Đăng xuất — blacklist access token hiện tại và xóa refresh token.
+Đăng xuất — blacklist access token hiện tại và xóa tất cả refresh token của user (logout all devices).
 
 **Header:** `Authorization: Bearer {accessToken}` *(bắt buộc)*
-
-**Request Body**
-```json
-{
-  "refreshToken": "eyJhbGciOiJIUzI1NiJ9..."
-}
-```
 
 **Response 200**
 ```json
 {
   "success": true,
-  "message": "Đăng xuất thành công."
+  "message": "Đăng xuất thành công"
 }
 ```
 
-**Side effect:** Lưu `jti` của access token vào Redis blacklist với TTL = thời gian còn lại của token.
+**Side effect:**
+- Lưu `jti` của access token vào Redis blacklist với TTL = thời gian còn lại của token.
+- Xóa toàn bộ refresh token của user (tất cả thiết bị đều bị logout).
 
 ---
 
@@ -178,13 +181,13 @@ Gửi email đặt lại mật khẩu.
 }
 ```
 
-**Response 200** **
+**Response 200**
 ```json
 {
   "success": true,
-  "message": "Email có thể đổi mật khẩu."
+  "message": "Email có thể đổi mật khẩu.",
   "data": {
-    "token": "reset-token-uuid",
+    "token":     "reset-token-uuid",
     "expiresIn": 900
   }
 }
@@ -209,16 +212,16 @@ Gửi email đặt lại mật khẩu.
 ```json
 {
   "success": true,
-  "message": "Mật khẩu đã được đặt lại thành công. Vui lòng đăng nhập lại."
+  "message": "Mật khẩu đã được đặt lại thành công. Vui lòng đăng nhập lại"
 }
 ```
 
 **Response 400** — token hết hạn hoặc không hợp lệ
 ```json
 {
-  "success": false,
-  "code":    "RESET_TOKEN_INVALID",
-  "message": "Link đặt lại mật khẩu không hợp lệ hoặc đã hết hạn."
+  "success":   false,
+  "errorCode": "RESET_TOKEN_INVALID",
+  "message":   "Link đặt lại mật khẩu không hợp lệ hoặc đã hết hạn."
 }
 ```
 
@@ -240,9 +243,9 @@ Xác thực email sau khi đăng ký.
 **Response 400**
 ```json
 {
-  "success": false,
-  "code":    "VERIFICATION_TOKEN_INVALID",
-  "message": "Link xác thực không hợp lệ hoặc đã hết hạn."
+  "success":   false,
+  "errorCode": "VERIFICATION_TOKEN_INVALID",
+  "message":   "Link xác thực không hợp lệ hoặc đã hết hạn."
 }
 ```
 
@@ -253,16 +256,16 @@ Xác thực email sau khi đăng ký.
 ---
 
 ### GET /oauth2/authorize/{provider}
-Redirect sang trang đăng nhập Google / Facebook. Spring Security tự xử lý, không cần viết controller.
+Redirect sang trang đăng nhập Google. Spring Security tự xử lý, không cần viết controller.
 
-- `provider`: `google` hoặc `facebook`
+- `provider`: `google`
 
-**Flow:** Client gọi endpoint này → redirect sang Google/Facebook → sau khi user đồng ý → Google/Facebook redirect về callback.
+**Flow:** Client gọi endpoint này → redirect sang Google → sau khi user đồng ý → Google redirect về callback.
 
 ---
 
 ### GET /oauth2/callback/{provider}
-Callback URL sau khi Google/Facebook xác thực. Spring Security tự xử lý.
+Callback URL sau khi Google xác thực. Spring Security tự xử lý.
 
 **Kết quả thành công:** Redirect về frontend kèm token trong URL fragment
 ```
@@ -289,20 +292,23 @@ Lấy thông tin profile của user đang đăng nhập.
 ```json
 {
   "success": true,
+  "message": "Lấy thông tin thành công",
   "data": {
-    "userId":          "550e8400-e29b-41d4-a716-446655440000",
-    "email":           "user@example.com",
-    "fullName":        "Nguyen Van A",
-    "phone":           "0901234567",
-    "avatarUrl":       "https://storage.shopnow.com/avatars/abc.jpg",
-    "role":            "ROLE_USER",
-    "provider":        "LOCAL",
-    "emailVerified":   true,
-    "isActive":        true,
-    "createdAt":       "2024-01-15T10:30:00Z"
+    "userId":        "550e8400-e29b-41d4-a716-446655440000",
+    "email":         "user@example.com",
+    "fullName":      "Nguyen Van A",
+    "phone":         "0901234567",
+    "avatarUrl":     "http://localhost:8081/uploads/abc.jpg",
+    "role":          "ROLE_USER",
+    "provider":      "LOCAL",
+    "emailVerified": true,
+    "isActive":      true,
+    "createdAt":     "2024-01-15T10:30:00"
   }
 }
 ```
+
+> **Lưu ý:** `createdAt` là `LocalDateTime` không có timezone (format: `"2024-01-15T10:30:00"`).
 
 ---
 
@@ -311,7 +317,7 @@ Cập nhật thông tin cá nhân.
 
 **Header:** `Authorization: Bearer {accessToken}` *(bắt buộc)*
 
-**Request Body** *(tất cả các field đều optional, chỉ gửi field muốn đổi)*
+**Request Body**
 ```json
 {
   "fullName": "Nguyen Van B",
@@ -323,12 +329,18 @@ Cập nhật thông tin cá nhân.
 ```json
 {
   "success": true,
-  "message": "Cập nhật thông tin thành công.",
+  "message": "Cập nhập thông tin thành công",
   "data": {
-    "userId":    "550e8400-e29b-41d4-a716-446655440000",
-    "fullName":  "Nguyen Van B",
-    "phone":     "0909999999",
-    "updatedAt": "2024-01-15T11:00:00Z"
+    "userId":        "550e8400-e29b-41d4-a716-446655440000",
+    "email":         "user@example.com",
+    "fullName":      "Nguyen Van B",
+    "phone":         "0909999999",
+    "avatarUrl":     null,
+    "role":          "ROLE_USER",
+    "provider":      "LOCAL",
+    "emailVerified": false,
+    "isActive":      true,
+    "createdAt":     "2024-01-15T10:30:00"
   }
 }
 ```
@@ -351,9 +363,19 @@ file: [binary image]
 ```json
 {
   "success": true,
+  "message": "Ảnh thành công",
   "data": {
-    "avatarUrl": "https://storage.shopnow.com/avatars/550e8400.jpg"
+    "avatarUrl": "http://localhost:8081/uploads/550e8400.jpg"
   }
+}
+```
+
+**Response 400** — file không hợp lệ
+```json
+{
+  "success":   false,
+  "errorCode": "INVALID_FILE",
+  "message":   "Đuôi ảnh không hợp lệ"
 }
 ```
 
@@ -368,36 +390,33 @@ file: [binary image]
 ```json
 {
   "currentPassword": "Password123!",
-  "newPassword":     "NewPassword456!",
-  "confirmPassword": "NewPassword456!"
+  "newPassword":     "NewPassword456!"
 }
 ```
+
+**Validation**
+- `currentPassword`: không được trống, 8–32 ký tự, ít nhất 1 chữ hoa + 1 số + 1 ký tự đặc biệt
+- `newPassword`: không được trống, 8–32 ký tự, ít nhất 1 chữ hoa + 1 số + 1 ký tự đặc biệt
 
 **Response 200**
 ```json
 {
   "success": true,
-  "message": "Đổi mật khẩu thành công. Vui lòng đăng nhập lại."
+  "message": "Đổi mật khẩu thành công"
 }
 ```
 
-**Response 400** — mật khẩu hiện tại sai
+**Response 400** — mật khẩu hiện tại sai hoặc tài khoản OAuth2
 ```json
 {
-  "success": false,
-  "code":    "WRONG_PASSWORD",
-  "message": "Mật khẩu hiện tại không đúng."
+  "success":   false,
+  "errorCode": "WRONG_PASSWORD",
+  "message":   "Mật khẩu hiện tại không đúng."
 }
 ```
 
-**Response 400** — tài khoản OAuth2
-```json
-{
-  "success": false,
-  "code":    "OAUTH2_ACCOUNT_NO_PASSWORD",
-  "message": "Tài khoản đăng nhập qua Google/Facebook không thể đổi mật khẩu."
-}
-```
+> **Lưu ý:** Cả 2 trường hợp (sai mật khẩu và tài khoản OAuth2) đều trả về `errorCode: WRONG_PASSWORD`. Message sẽ khác nhau.
+> **Side effect:** Xóa tất cả refresh token của user (logout all devices).
 
 ---
 
@@ -412,26 +431,17 @@ Lấy danh sách địa chỉ của user.
 ```json
 {
   "success": true,
+  "message": "Lấy danh sách địa chỉ thành công",
   "data": [
     {
-      "addressId":   "addr-uuid-1",
-      "fullName":    "Nguyen Van A",
-      "phone":       "0901234567",
-      "province":    "TP. Hồ Chí Minh",
-      "district":    "Quận 1",
-      "ward":        "Phường Bến Nghé",
-      "streetDetail":"123 Đường Lê Lợi",
-      "isDefault":   true
-    },
-    {
-      "addressId":   "addr-uuid-2",
-      "fullName":    "Nguyen Van A",
-      "phone":       "0901234567",
-      "province":    "Hà Nội",
-      "district":    "Quận Hoàn Kiếm",
-      "ward":        "Phường Hàng Bài",
-      "streetDetail":"456 Đường Đinh Tiên Hoàng",
-      "isDefault":   false
+      "addressId":    "uuid-1",
+      "fullName":     "Nguyen Van A",
+      "phone":        "0901234567",
+      "province":     "TP. Hồ Chí Minh",
+      "district":     "Quận 1",
+      "ward":         "Phường Bến Nghé",
+      "streetDetail": "123 Đường Lê Lợi",
+      "isDefault":    true
     }
   ]
 }
@@ -440,7 +450,9 @@ Lấy danh sách địa chỉ của user.
 ---
 
 ### POST /users/me/addresses
-Thêm địa chỉ mới.
+Thêm địa chỉ mới. `fullName` và `phone` lấy từ profile của user.
+
+**Header:** `Authorization: Bearer {accessToken}` *(bắt buộc)*
 
 **Request Body**
 ```json
@@ -457,26 +469,46 @@ Thêm địa chỉ mới.
 ```json
 {
   "success": true,
+  "message": "Thêm thành công",
   "data": {
-    "addressId": "addr-uuid-3"
+    "addressId":    "uuid-moi",
+    "fullName":     "Nguyen Van A",
+    "phone":        "0901234567",
+    "province":     "TP. Hồ Chí Minh",
+    "district":     "Quận 1",
+    "ward":         "Phường Bến Nghé",
+    "streetDetail": "123 Đường Lê Lợi",
+    "isDefault":    false
   }
 }
 ```
 
-**Validation:** Mỗi user tối đa 5 địa chỉ.
+**Validation:**
+- Mỗi user tối đa 5 địa chỉ.
+- User phải có `phone` trong profile trước khi thêm địa chỉ.
+
+**Response 400** — vượt giới hạn hoặc chưa có phone
+```json
+{
+  "success":   false,
+  "errorCode": "INVALID_FILE",
+  "message":   "Mỗi tài khoản chỉ được thêm tối đa 5 địa chỉ"
+}
+```
 
 ---
 
 ### PUT /users/me/addresses/{addressId}
 Cập nhật địa chỉ.
 
-**Request Body:** Giống POST, các field optional.
+**Request Body:** Giống POST.
 
 **Response 200**
 ```json
 {
   "success": true,
-  "message": "Cập nhật địa chỉ thành công."
+  "message": "Cập nhập thành công",
+  "data": { }
 }
 ```
 
@@ -489,7 +521,7 @@ Xóa địa chỉ.
 ```json
 {
   "success": true,
-  "message": "Đã xóa địa chỉ."
+  "message": "Xóa thành công"
 }
 ```
 
@@ -502,7 +534,7 @@ Xóa địa chỉ.
 ```json
 {
   "success": true,
-  "message": "Đã đặt làm địa chỉ mặc định."
+  "message": "Cập nhập thành công"
 }
 ```
 
@@ -510,7 +542,7 @@ Xóa địa chỉ.
 
 ## 5. INTERNAL — Dành cho các service khác gọi
 
-> Các endpoint này chỉ accessible trong internal network, được bảo vệ bằng header `X-Internal-Token`.
+> Các endpoint này được bảo vệ bằng header `X-Internal-Token`. Request thiếu hoặc sai token → 403.
 
 ---
 
@@ -537,6 +569,8 @@ Order Service gọi để lấy địa chỉ giao hàng khi tạo đơn.
 }
 ```
 
+> **Lưu ý:** `defaultAddress` là `null` nếu user chưa có địa chỉ mặc định.
+
 ---
 
 ### GET /internal/users/{userId}/exists
@@ -545,7 +579,7 @@ Kiểm tra user có tồn tại không.
 **Response 200**
 ```json
 {
-  "exists": true,
+  "exists":   true,
   "isActive": true
 }
 ```
@@ -556,42 +590,46 @@ Kiểm tra user có tồn tại không.
 
 ---
 
-### GET /admin/users
+### GET /api/v1/admin/users
 Lấy danh sách tất cả user, có phân trang và filter.
 
 **Header:** `Authorization: Bearer {accessToken}` *(ROLE_ADMIN)*
 
 **Query Params**
 ```
-page     = 0          (default 0)
-size     = 20         (default 20, max 100)
-sort     = createdAt  (createdAt | fullName | email)
-direction= DESC       (ASC | DESC)
-keyword  = "nguyen"   (tìm theo email hoặc fullName)
-provider = LOCAL      (filter theo provider)
-isActive = true       (filter theo trạng thái)
+page      = 0         (default 0)
+size      = 10        (default 10)
+sort      = createdAt (default createdAt)
+direction = DESC      (default DESC — ASC | DESC)
+keyword               (tùy chọn — tìm theo email hoặc fullName)
+provider              (tùy chọn — filter theo provider: LOCAL | GOOGLE)
+isActive              (tùy chọn — filter theo trạng thái: true | false)
 ```
 
 **Response 200**
 ```json
 {
   "success": true,
+  "message": "lấy thành công",
   "data": {
     "content": [
       {
-        "userId":    "550e8400-...",
-        "email":     "user@example.com",
-        "fullName":  "Nguyen Van A",
-        "role":      "ROLE_USER",
-        "provider":  "LOCAL",
-        "isActive":  true,
-        "createdAt": "2024-01-15T10:30:00Z"
+        "userId":        "550e8400-...",
+        "email":         "user@example.com",
+        "fullName":      "Nguyen Van A",
+        "phone":         "0901234567",
+        "avatarUrl":     null,
+        "role":          "ROLE_USER",
+        "provider":      "LOCAL",
+        "emailVerified": false,
+        "isActive":      true,
+        "createdAt":     "2024-01-15T10:30:00"
       }
     ],
     "page":          0,
-    "size":          20,
+    "size":          10,
     "totalElements": 150,
-    "totalPages":    8,
+    "totalPages":    15,
     "isLast":        false
   }
 }
@@ -599,47 +637,38 @@ isActive = true       (filter theo trạng thái)
 
 ---
 
-### GET /admin/users/{userId}
-Lấy chi tiết 1 user.
-
-**Response 200:** Trả về đầy đủ thông tin như `/users/me` kèm thêm `lastLoginAt`.
+### GET /api/v1/admin/users/{userId}
+Lấy chi tiết 1 user (trả về đầy đủ thông tin như `/users/me`).
 
 ---
 
-### PATCH /admin/users/{userId}/ban
+### PATCH /api/v1/admin/users/{userId}/ban
 Khoá tài khoản user.
-
-**Request Body**
-```json
-{
-  "reason": "Vi phạm điều khoản sử dụng"
-}
-```
 
 **Response 200**
 ```json
 {
   "success": true,
-  "message": "Đã khoá tài khoản người dùng."
+  "message": "lấy thành công"
 }
 ```
 
 ---
 
-### PATCH /admin/users/{userId}/unban
+### PATCH /api/v1/admin/users/{userId}/unban
 Mở khoá tài khoản user.
 
 **Response 200**
 ```json
 {
   "success": true,
-  "message": "Đã mở khoá tài khoản người dùng."
+  "message": "lấy thành công"
 }
 ```
 
 ---
 
-### PATCH /admin/users/{userId}/role
+### PATCH /api/v1/admin/users/{userId}/role
 Thay đổi role của user.
 
 **Request Body**
@@ -653,7 +682,7 @@ Thay đổi role của user.
 ```json
 {
   "success": true,
-  "message": "Đã cập nhật role thành công."
+  "message": "lấy thành công"
 }
 ```
 
@@ -666,23 +695,19 @@ Mọi lỗi đều trả về cùng format:
 ```json
 {
   "success":   false,
-  "code":      "ERROR_CODE",
-  "message":   "Mô tả lỗi thân thiện với người dùng",
-  "timestamp": "2024-01-15T10:30:00Z",
-  "path":      "/api/v1/auth/login"
+  "errorCode": "ERROR_CODE",
+  "message":   "Mô tả lỗi thân thiện với người dùng"
 }
 ```
+
+> **Lưu ý:** Field tên là `errorCode` (không phải `code`).
 
 **Validation error (400):**
 ```json
 {
-  "success": false,
-  "code":    "VALIDATION_FAILED",
-  "message": "Dữ liệu không hợp lệ.",
-  "errors": [
-    { "field": "email",    "message": "Email không đúng định dạng." },
-    { "field": "password", "message": "Mật khẩu phải có ít nhất 8 ký tự." }
-  ]
+  "success":   false,
+  "errorCode": "INVALID_REQUEST",
+  "message":   "email: email is invalid, password: Password must be between 8 and 32 characters"
 }
 ```
 
@@ -695,8 +720,24 @@ Mọi lỗi đều trả về cùng format:
 | 401 | Chưa đăng nhập / token hết hạn |
 | 403 | Không có quyền |
 | 404 | Không tìm thấy |
-| 409 | Conflict (email đã tồn tại...) |
+| 409 | Conflict (email đã tồn tại) |
 | 500 | Lỗi server |
+
+**Error codes:**
+| errorCode | HTTP | Ý nghĩa |
+|-----------|------|---------|
+| `INVALID_REQUEST` | 400 | Validation thất bại |
+| `INVALID_FILE` | 400 | File upload không hợp lệ / lỗi địa chỉ |
+| `WRONG_PASSWORD` | 400 | Sai mật khẩu hoặc tài khoản OAuth2 |
+| `RESET_TOKEN_INVALID` | 400 | Reset password token hết hạn |
+| `VERIFICATION_TOKEN_INVALID` | 400 | Email verify token hết hạn |
+| `INVALID_CREDENTIALS` | 401 | Sai email/password khi login |
+| `REFRESH_TOKEN_INVALID` | 401 | Refresh token không hợp lệ |
+| `ACCOUNT_DISABLED` | 403 | Tài khoản bị vô hiệu hóa |
+| `ACCOUNT_LOCKED` | 403 | Tài khoản bị khóa |
+| `NOT_FOUND` | 404 | Không tìm thấy resource |
+| `EMAIL_ALREADY_EXISTS` | 409 | Email đã được đăng ký |
+| `INTERNAL_ERROR` | 500 | Lỗi hệ thống |
 
 ---
 
@@ -717,11 +758,11 @@ Mọi lỗi đều trả về cùng format:
 | phone | VARCHAR(15) | NULLABLE | |
 | avatar_url | TEXT | NULLABLE | |
 | role | VARCHAR(20) | NOT NULL, DEFAULT 'ROLE_USER' | ROLE_USER / ROLE_ADMIN |
-| provider | VARCHAR(20) | NOT NULL, DEFAULT 'LOCAL' | LOCAL / GOOGLE / FACEBOOK |
-| provider_id | VARCHAR(255) | NULLABLE | ID từ Google/Facebook |
+| provider | VARCHAR(20) | NOT NULL, DEFAULT 'LOCAL' | LOCAL / GOOGLE |
+| provider_id | VARCHAR(255) | NULLABLE | ID từ Google |
 | is_active | BOOLEAN | NOT NULL, DEFAULT TRUE | |
 | email_verified | BOOLEAN | NOT NULL, DEFAULT FALSE | |
-| last_login_at | TIMESTAMP | NULLABLE | |
+| last_login_at | TIMESTAMP | NULLABLE | Cập nhật mỗi lần login thành công |
 | created_at | TIMESTAMP | NOT NULL, DEFAULT NOW() | |
 | updated_at | TIMESTAMP | NOT NULL, DEFAULT NOW() | |
 
@@ -740,7 +781,7 @@ CREATE INDEX idx_users_is_active ON users(is_active);
 |--------|------|-----------|---------|
 | id | UUID | PK, DEFAULT uuid_generate_v4() | |
 | user_id | UUID | NOT NULL, FK → users(id) ON DELETE CASCADE | |
-| token | TEXT | NOT NULL, UNIQUE | Refresh token string |
+| token | TEXT | NOT NULL, UNIQUE | Refresh token string (UUID) |
 | expires_at | TIMESTAMP | NOT NULL | |
 | created_at | TIMESTAMP | NOT NULL, DEFAULT NOW() | |
 
@@ -750,7 +791,10 @@ CREATE UNIQUE INDEX idx_refresh_tokens_token ON refresh_tokens(token);
 CREATE INDEX idx_refresh_tokens_user_id ON refresh_tokens(user_id);
 ```
 
-**Lưu ý:** Một user có thể có nhiều refresh token (đăng nhập nhiều thiết bị). Khi logout thì xóa đúng token đó. Khi đổi mật khẩu thì xóa hết tất cả token của user đó.
+**Lưu ý:**
+- Một user có thể có nhiều refresh token (đăng nhập nhiều thiết bị).
+- Khi logout → xóa **tất cả** refresh token của user đó (logout all devices).
+- Khi đổi mật khẩu → xóa tất cả refresh token của user đó.
 
 ---
 
@@ -760,12 +804,12 @@ CREATE INDEX idx_refresh_tokens_user_id ON refresh_tokens(user_id);
 |--------|------|-----------|---------|
 | id | UUID | PK, DEFAULT uuid_generate_v4() | |
 | user_id | UUID | NOT NULL, FK → users(id) ON DELETE CASCADE | |
-| full_name | VARCHAR(100) | NOT NULL | Tên người nhận |
-| phone | VARCHAR(15) | NOT NULL | SĐT người nhận |
-| province | VARCHAR(100) | NOT NULL | Tỉnh / TP |
-| district | VARCHAR(100) | NOT NULL | Quận / Huyện |
-| ward | VARCHAR(100) | NOT NULL | Phường / Xã |
-| street_detail | VARCHAR(255) | NOT NULL | Số nhà, tên đường |
+| full_name | VARCHAR(100) | NOT NULL | Lấy từ user profile khi tạo |
+| phone | VARCHAR(15) | NOT NULL | Lấy từ user profile khi tạo |
+| province | VARCHAR(100) | NOT NULL | |
+| district | VARCHAR(100) | NOT NULL | |
+| ward | VARCHAR(100) | NOT NULL | |
+| street_detail | VARCHAR(255) | NOT NULL | |
 | is_default | BOOLEAN | NOT NULL, DEFAULT FALSE | |
 | created_at | TIMESTAMP | NOT NULL, DEFAULT NOW() | |
 | updated_at | TIMESTAMP | NOT NULL, DEFAULT NOW() | |
@@ -775,7 +819,10 @@ CREATE INDEX idx_refresh_tokens_user_id ON refresh_tokens(user_id);
 CREATE INDEX idx_addresses_user_id ON user_addresses(user_id);
 ```
 
-**Constraint:** Mỗi user chỉ có 1 địa chỉ default → xử lý bằng logic trong Service (khi set default mới, update false tất cả địa chỉ cũ của user đó trước).
+**Constraint:**
+- Mỗi user tối đa **5 địa chỉ** → kiểm tra trong Service.
+- Mỗi user chỉ có 1 địa chỉ default → khi set default mới, update false tất cả địa chỉ cũ trước.
+- User phải có `phone` trong profile trước khi thêm địa chỉ.
 
 ---
 
@@ -786,7 +833,6 @@ CREATE INDEX idx_addresses_user_id ON user_addresses(user_id);
 | `blacklist:{jti}` | `"1"` | Thời gian còn lại của access token | JWT blacklist khi logout |
 | `reset_pwd:{token}` | `userId` | 15 phút | Forgot password token |
 | `verify_email:{token}` | `userId` | 24 giờ | Email verification token |
-| `rate_limit:login:{ip}` | Số lần thử | 15 phút | Chặn brute force login (max 5 lần) |
 
 ---
 
@@ -804,12 +850,14 @@ CREATE INDEX idx_addresses_user_id ON user_addresses(user_id);
     "email":     "user@example.com",
     "fullName":  "Nguyen Van A",
     "provider":  "LOCAL",
-    "createdAt": "2024-01-15T10:30:00Z"
+    "createdAt": "2024-01-15T10:30:00"
   }
 }
 ```
 **Kafka key:** `userId`
-**Consumer:** Notification Service (gửi email chào mừng)
+**Consumer:** Notification Service (gửi email chào mừng + link verify)
+
+> **Lưu ý:** `createdAt` là `LocalDateTime.toString()` — không có timezone suffix `Z`.
 
 ---
 
@@ -828,6 +876,7 @@ CREATE INDEX idx_addresses_user_id ON user_addresses(user_id);
   }
 }
 ```
+**Kafka key:** `userId`
 **Consumer:** Notification Service (gửi email reset password)
 
 ---
@@ -856,8 +905,8 @@ CREATE INDEX idx_addresses_user_id ON user_addresses(user_id);
 | PATCH | /users/me/addresses/{id}/default | ✅ | USER, ADMIN |
 | GET | /internal/users/{userId} | 🔒 Internal | — |
 | GET | /internal/users/{userId}/exists | 🔒 Internal | — |
-| GET | /admin/users | ✅ | ADMIN |
-| GET | /admin/users/{userId} | ✅ | ADMIN |
-| PATCH | /admin/users/{userId}/ban | ✅ | ADMIN |
-| PATCH | /admin/users/{userId}/unban | ✅ | ADMIN |
-| PATCH | /admin/users/{userId}/role | ✅ | ADMIN |
+| GET | /api/v1/admin/users | ✅ | ADMIN |
+| GET | /api/v1/admin/users/{userId} | ✅ | ADMIN |
+| PATCH | /api/v1/admin/users/{userId}/ban | ✅ | ADMIN |
+| PATCH | /api/v1/admin/users/{userId}/unban | ✅ | ADMIN |
+| PATCH | /api/v1/admin/users/{userId}/role | ✅ | ADMIN |

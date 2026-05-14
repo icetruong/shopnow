@@ -120,6 +120,8 @@ public class UserService {
                 .expiresAt(LocalDateTime.now().plusSeconds(refreshTokenExpiry))
                 .build();
 
+        user.setLastLoginAt(LocalDateTime.now());
+        userRepo.save(user);
         refreshTokenRepo.save(refreshTokenEntity);
 
         return new TokenResponse(token, refreshToken, "Bearer", accessTokenExpiry);
@@ -283,7 +285,7 @@ public class UserService {
             throw new ChangePasswordException("Mật khẩu hiện tại không đúng.");
 
         user.setPasswordHash(passwordEncoder.encode(request.getNewPassword()));
-
+        refreshTokenRepo.deleteAllByUser(user);
         userRepo.save(user);
     }
 
@@ -361,12 +363,12 @@ public class UserService {
         User user = userRepo.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found"));
 
-        AddressInternalResponse addressInternalResponse = new AddressInternalResponse();
+        AddressInternalResponse addressInternalResponse = null;
         for(UserAddress userAddress : user.getAddresses())
         {
             if(userAddress.getIsDefault())
             {
-                 addressInternalResponse= new AddressInternalResponse(
+                addressInternalResponse = new AddressInternalResponse(
                         userAddress.getFullName(),
                         userAddress.getPhone(),
                         userAddress.getProvince(),
@@ -374,7 +376,7 @@ public class UserService {
                         userAddress.getWard(),
                         userAddress.getStreetDetail()
                 );
-                 break;
+                break;
             }
         }
 
