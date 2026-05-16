@@ -58,4 +58,17 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.CONFLICT)
                 .body(ApiResponse.fail(ex.getMessage(), "VARIANT_IN_ACTIVE_ORDER"));
     }
+
+    @ExceptionHandler(TooManyImagesException.class)
+    public ResponseEntity<ApiResponse<Void>> handleTooManyImages(TooManyImagesException ex) {
+        return ResponseEntity.badRequest()
+                .body(ApiResponse.fail(ex.getMessage(), "TOO_MANY_IMAGES"));
+    }
+
+    @ExceptionHandler(InvalidFileTypeException.class)
+    public ResponseEntity<ApiResponse<Void>> handleInvalidFileType(InvalidFileTypeException ex) {
+        return ResponseEntity.badRequest()
+                .body(ApiResponse.fail(ex.getMessage(), "INVALID_FILE_TYPE"));
+    }
+
 }
