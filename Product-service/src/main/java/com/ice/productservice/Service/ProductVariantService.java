@@ -3,6 +3,7 @@ package com.ice.productservice.Service;
 import com.ice.productservice.DTO.Request.Product.CreateVariantProductRequest;
 import com.ice.productservice.DTO.Request.Product.UpdateVariantProductRequest;
 import com.ice.productservice.DTO.Request.Product.VariantProductRequest;
+import com.ice.productservice.DTO.Response.Internal.ProductVariantInternalResponse;
 import com.ice.productservice.DTO.Response.Product.VariantProductResponse;
 import com.ice.productservice.Entity.Product;
 import com.ice.productservice.Entity.ProductVariant;
@@ -82,5 +83,21 @@ public class ProductVariantService {
             throw new VariantInActiveOrderException("Không thể xóa variant đang có trong đơn hàng chưa hoàn thành.");
 
         productVariantRepo.delete(productVariant);
+    }
+
+    public ProductVariantInternalResponse getProductAndVariantForInternal(UUID productId, UUID variantId)
+    {
+        ProductVariant productVariant = productVariantRepo.findByIdAndProduct_Id(variantId, productId)
+                .orElseThrow(() -> new ResourceNotFoundException("not found product variant"));
+
+        return new ProductVariantInternalResponse(
+                productVariant.getId().toString(),
+                productVariant.getProduct().getId().toString(),
+                productVariant.getColor(),
+                productVariant.getSku(),
+                productVariant.getSize(),
+                productVariant.getPrice(),
+                productVariant.getIsActive()
+        );
     }
 }

@@ -22,4 +22,8 @@ public interface ProductRepo extends JpaRepository<Product, UUID>, JpaSpecificat
     @EntityGraph(attributePaths = {"productAttributes", "productImages", "productVariants", "category"})
     Optional<Product> findBySlugAndIsDeleteFalse(String slug);
 
+    @EntityGraph(attributePaths = {"category"})
+    @NonNull
+    Optional<Product> findById(UUID id);
+
 }

@@ -20,6 +20,7 @@ public class InternalTokenFilter extends OncePerRequestFilter {
 
         if (token == null || !token.equals(secretToken)) {
             response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+            response.setContentType("application/json");
             response.getWriter().write("{\"success\":false,\"message\":\"Forbidden\"}");
             return;
         }

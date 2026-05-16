@@ -1,8 +1,12 @@
 package com.ice.productservice.Service;
 
+import com.ice.productservice.DTO.Request.Internal.ProductRatingInternalRequest;
 import com.ice.productservice.DTO.Request.Product.ProductRequest;
 import com.ice.productservice.DTO.Request.Product.ProductSetIsActiveRequest;
 import com.ice.productservice.DTO.Request.Product.ProductUpdateRequest;
+import com.ice.productservice.DTO.Response.Internal.ProductInternalResponse;
+import com.ice.productservice.DTO.Response.Internal.ProductRatingInternalResponse;
+import com.ice.productservice.DTO.Response.Internal.ProductVariantInternalResponse;
 import com.ice.productservice.DTO.Response.Product.*;
 import com.ice.productservice.Entity.*;
 import com.ice.productservice.Exception.ResourceNotFoundException;
@@ -29,7 +33,7 @@ public class ProductService {
     private final CategoryRepo categoryRepo;
     private final ProductAttributeService productAttributeService;
     private final ProductVariantService productVariantService;
-    
+
 
     public PageProductResponse getAllProduct(Integer page, Integer size, String sort, String direction, String categoryId, Long minPrice, Long maxPrice, Boolean isActive) {
         if(minPrice != null && maxPrice != null && minPrice > maxPrice)
@@ -139,6 +143,34 @@ public class ProductService {
 
         product.setIsDelete(true);
         productRepo.save(product);
+    }
+
+    public ProductInternalResponse getProductForInternal(UUID productId)
+    {
+        Product product = productRepo.findById(productId)
+                .orElseThrow(() -> new ResourceNotFoundException("not found product"));
+
+        return new ProductInternalResponse(
+                product.getId().toString(),
+                product.getName(),
+                product.getIsActive(),
+                product.getCategory().getId().toString()
+                );
+    }
+
+    public ProductRatingInternalResponse updateRating(ProductRatingInternalRequest request)
+    {
+        Product product = productRepo.findById(UUID.fromString(request.getProductId()))
+                .orElse(null);
+
+        if(product == null)
+            return new ProductRatingInternalResponse(false);
+
+        product.setRating(request.getAvgRating());
+
+        productRepo.save(product);
+
+        return new ProductRatingInternalResponse(true);
     }
 
     private ProductDetailResponse toProductDetailResponse(Product product)
