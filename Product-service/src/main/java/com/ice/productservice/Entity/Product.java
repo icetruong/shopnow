@@ -6,6 +6,8 @@ import org.hibernate.annotations.UuidGenerator;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
 @Entity
@@ -74,6 +76,18 @@ public class Product {
 
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
+
+    @OneToMany(mappedBy = "product")
+    @Builder.Default
+    private List<ProductAttribute> productAttributes = new ArrayList<>();
+
+    @OneToMany(mappedBy = "product")
+    @Builder.Default
+    private List<ProductImage> productImages = new ArrayList<>();
+
+    @OneToMany(mappedBy = "product")
+    @Builder.Default
+    private List<ProductVariant> productVariants = new ArrayList<>();
 
     @PrePersist
     protected void onCreate() {
