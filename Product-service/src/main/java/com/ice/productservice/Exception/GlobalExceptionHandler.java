@@ -51,4 +51,11 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.CONFLICT)
                 .body(ApiResponse.fail(ex.getMessage(), "CATEGORY_HAS_CHILDREN"));
     }
+
+    @ExceptionHandler(VariantInActiveOrderException.class)
+    public ResponseEntity<ApiResponse<Void>> handleVariantInActiveOrder(VariantInActiveOrderException ex)
+    {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(ApiResponse.fail(ex.getMessage(), "VARIANT_IN_ACTIVE_ORDER"));
+    }
 }

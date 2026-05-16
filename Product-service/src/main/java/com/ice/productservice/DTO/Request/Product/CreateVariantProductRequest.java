@@ -14,22 +14,22 @@ import lombok.Setter;
 @AllArgsConstructor
 @NoArgsConstructor
 public class CreateVariantProductRequest {
-    @NotBlank(message = "SKU không được trống")
+    @NotBlank(message = "sku must not be blank")
     private String sku;
 
-    @NotBlank(message = "Màu sắc không được trống")
+    @NotBlank(message = "color must not be blank")
     private String color;
 
-    @NotBlank(message = "Kích thước không được trống")
+    @NotBlank(message = "size must not be blank")
     private String size;
-    @NotNull(message = "Giá không được trống")
-    @Min(value = 1, message = "Giá phải > 0")
+    @NotNull(message = "price must not be null")
+    @Min(value = 1, message = "price must be greater than 0")
     private Long price;
 
-    @NotNull(message = "Số lượng không được trống")
-    @Min(value = 0, message = "Số lượng phải >= 0")
+    @NotNull(message = "stockQty must not be null")
+    @Min(value = 0, message = "stockQty must be greater than or equal to 0")
     private Integer stockQty;
 
-    @NotBlank(message = "imageUrl không được trống")
+    @NotBlank(message = "imageUrl must not be blank")
     private String imageUrl;
 }

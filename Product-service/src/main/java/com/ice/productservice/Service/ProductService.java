@@ -29,7 +29,7 @@ public class ProductService {
     private final CategoryRepo categoryRepo;
     private final ProductAttributeService productAttributeService;
     private final ProductVariantService productVariantService;
-
+    
 
     public PageProductResponse getAllProduct(Integer page, Integer size, String sort, String direction, String categoryId, Long minPrice, Long maxPrice, Boolean isActive) {
         if(minPrice != null && maxPrice != null && minPrice > maxPrice)
