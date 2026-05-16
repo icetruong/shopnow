@@ -6,7 +6,6 @@ import com.ice.productservice.DTO.Request.Product.ProductSetIsActiveRequest;
 import com.ice.productservice.DTO.Request.Product.ProductUpdateRequest;
 import com.ice.productservice.DTO.Response.Internal.ProductInternalResponse;
 import com.ice.productservice.DTO.Response.Internal.ProductRatingInternalResponse;
-import com.ice.productservice.DTO.Response.Internal.ProductVariantInternalResponse;
 import com.ice.productservice.DTO.Response.Product.*;
 import com.ice.productservice.Entity.*;
 import com.ice.productservice.Exception.ResourceNotFoundException;
@@ -19,9 +18,16 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
+import org.springframework.data.redis.core.Cursor;
+import org.springframework.data.redis.core.RedisCallback;
+import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.core.ScanOptions;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.DigestUtils;
 
+import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
@@ -33,9 +39,18 @@ public class ProductService {
     private final CategoryRepo categoryRepo;
     private final ProductAttributeService productAttributeService;
     private final ProductVariantService productVariantService;
+    private final RedisTemplate<String, Object> redisTemplate;
 
 
     public PageProductResponse getAllProduct(Integer page, Integer size, String sort, String direction, String categoryId, Long minPrice, Long maxPrice, Boolean isActive) {
+        String cacheKey = buildCacheKey(page,size, sort,direction,categoryId, minPrice, maxPrice, isActive);
+
+        Object cache = redisTemplate.opsForValue().get(cacheKey);
+        if(cache != null)
+        {
+            return (PageProductResponse) cache;
+        }
+
         if(minPrice != null && maxPrice != null && minPrice > maxPrice)
             throw new IllegalArgumentException("min price greater than max price");
 
@@ -56,7 +71,8 @@ public class ProductService {
         List<ProductResponse> productResponses = products.stream().map(
                 this::toProductResponse
         ).toList();
-        return new PageProductResponse(
+
+        PageProductResponse response = new PageProductResponse(
                 productResponses,
                 products.getNumber(),
                 products.getSize(),
@@ -64,6 +80,10 @@ public class ProductService {
                 products.getTotalPages(),
                 products.isLast()
         );
+
+        redisTemplate.opsForValue().set(cacheKey, response, Duration.ofMinutes(5));
+
+        return response;
     }
 
     @Cacheable(value = "products", key = "#slug")
@@ -95,6 +115,8 @@ public class ProductService {
         productAttributeService.createProductAttribute(productRequest.getAttributes(), save);
         productVariantService.createProductVariant(productRequest.getVariants(), save);
 
+        invalidateListCache();
+
         return new ProductCreatedResponse(
                 save.getId().toString(),
                 save.getSlug()
@@ -122,6 +144,8 @@ public class ProductService {
         Product save = productRepo.save(product);
         productAttributeService.deleteAllProductAttributeByProduct(save);
         productAttributeService.createProductAttribute(productRequest.getAttributes(), save);
+
+        invalidateListCache();
     }
 
     @CacheEvict(value = "products", allEntries = true)
@@ -132,6 +156,8 @@ public class ProductService {
 
         product.setIsActive(request.getIsActive());
         productRepo.save(product);
+
+        invalidateListCache();
     }
 
 
@@ -143,6 +169,8 @@ public class ProductService {
 
         product.setIsDelete(true);
         productRepo.save(product);
+
+        invalidateListCache();
     }
 
     public ProductInternalResponse getProductForInternal(UUID productId)
@@ -255,6 +283,36 @@ public class ProductService {
                 product.getCategory().getName(),
                 product.getIsActive()
         );
+    }
+
+    private String buildCacheKey(Integer page, Integer size, String sort, String direction, String categoryId, Long minPrice, Long maxPrice, Boolean isActive) {
+        String params = page + ":" +
+                size + ":" +
+                sort + ":" +
+                direction + ":" +
+                categoryId + ":" +
+                minPrice + ":" +
+                maxPrice + ":" +
+                isActive;
+
+        String hash = DigestUtils.md5DigestAsHex(params.getBytes());
+        return "products:list:" + hash;
+    }
+
+    private void invalidateListCache() {
+        ScanOptions options = ScanOptions.scanOptions()
+                .match("products:list:*")
+                .count(100)
+                .build();
+
+        redisTemplate.execute((RedisCallback<Void>) connection -> {
+            try (Cursor<byte[]> cursor = connection.keyCommands().scan(options)) {
+                List<String> keys = new ArrayList<>();
+                cursor.forEachRemaining(key -> keys.add(new String(key)));
+                if (!keys.isEmpty()) redisTemplate.delete(keys);
+            }
+            return null;
+        });
     }
 
 }
