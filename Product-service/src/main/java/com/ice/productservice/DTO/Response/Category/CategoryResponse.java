@@ -1,4 +1,4 @@
-package com.ice.productservice.DTO.Response;
+package com.ice.productservice.DTO.Response.Category;
 
 import lombok.AllArgsConstructor;
 import lombok.Getter;
