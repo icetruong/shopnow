@@ -25,6 +25,9 @@ import org.springframework.stereotype.Service;
 import java.util.List;
 import java.util.Objects;
 
+// TODO: Tách toàn bộ class này sang Search Service
+// Search Service sẽ consume Kafka event "product.updated" và tự index vào Elasticsearch
+// Product Service không nên ghi thẳng vào Elasticsearch
 @Service
 @RequiredArgsConstructor
 public class ProductSearchService {

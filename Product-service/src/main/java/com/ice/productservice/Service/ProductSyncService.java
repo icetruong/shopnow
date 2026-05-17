@@ -13,6 +13,9 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.List;
 import java.util.Objects;
 
+// TODO: Tách toàn bộ class này sang Search Service
+// Search Service sẽ tự sync vào Elasticsearch sau khi consume Kafka event "product.updated"
+// Product Service không nên phụ thuộc vào Elasticsearch
 @Service
 @RequiredArgsConstructor
 public class ProductSyncService {

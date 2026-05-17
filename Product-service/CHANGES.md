@@ -111,3 +111,68 @@ Response includes `content[]`, pagination fields, and `aggregations` (categories
 ## Known Limitation
 
 `CategoryAggregation.name` currently returns the `categoryId` (UUID) instead of the category name, because Elasticsearch terms aggregation only returns the bucket key. To resolve category names, the frontend should call the category API with the returned IDs, or a sub-aggregation (`top_hits`) can be added later.
+
+---
+
+# Session 2 — Bug fixes, Autocomplete & Kafka
+
+## Files Modified
+
+### 1. `Service/ProductSearchService.java`
+
+**Bug:** NPE trong `toAggregationsResponse()` — `b.from()` và `b.to()` trả về `@Nullable Double`, code cũ unbox trực tiếp gây NPE với bucket đầu (`from = null`) và bucket cuối (`to = null`).
+
+**Fix:**
+```java
+// Trước
+b.from() > 0 ? (long) b.from() : null,
+b.to() < Double.MAX_VALUE ? (long) b.to() : null,
+
+// Sau
+b.from() != null && b.from() > 0 ? (long) b.from().doubleValue() : null,
+b.to() != null && b.to() < Double.MAX_VALUE ? (long) b.to().doubleValue() : null,
+```
+
+**Added:** Method `suggest()` cho autocomplete sử dụng `search_as_you_type` field, `multi_match` với `BoolPrefix` type trên `nameSuggest`, `nameSuggest._2gram`, `nameSuggest._3gram`.
+
+**Added:** TODO comment trên class — đánh dấu cần tách sang Search Service.
+
+---
+
+### 2. `Service/ProductService.java`
+
+**Bug:** `updateRating()` cập nhật rating trong PostgreSQL nhưng không sync lên Elasticsearch → search sort theo rating trả kết quả sai.
+
+**Fix:** Thêm `productSyncService.indexProduct(product)` sau `productRepo.save(product)` trong `updateRating()`.
+
+---
+
+### 3. `Repository/ProductRepo.java`
+
+**Bug:** `syncAll()` gọi `productRepo.findAll()` với lazy collections → N+1 queries (1000 sản phẩm = ~3000 queries).
+
+**Fix:** Override `findAll()` với `@EntityGraph(attributePaths = {"productImages", "productVariants", "category"})` để eager load trong 1 query.
+
+---
+
+### 4. `Document/ProductDocument.java`
+
+**Fix:** Đổi `DateFormat.date_hour_minute_second` → `DateFormat.date_optional_time` để tránh mất sub-second precision khi serialize `LocalDateTime`.
+
+**Added:** Field `nameSuggest` với `@Field(type = FieldType.Search_As_You_Type)` cho tính năng autocomplete.
+
+---
+
+### 5. `Service/ProductSyncService.java`
+
+**Added:** `.nameSuggest(product.getName())` vào builder trong `indexProduct()` để populate field autocomplete.
+
+**Added:** TODO comment trên class — đánh dấu cần tách sang Search Service.
+
+---
+
+### 6. `Controller/ProductController.java`
+
+**Added:** Endpoint `GET /api/v1/products/search/suggest?q=&size=` gọi `productSearchService.suggest()`.
+
+**Added:** TODO comment trên 2 search endpoint — đánh dấu cần tách sang Search Service.

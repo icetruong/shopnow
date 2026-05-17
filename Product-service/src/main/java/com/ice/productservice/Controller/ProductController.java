@@ -32,6 +32,7 @@ public class ProductController {
     private final ProductImageService productImageService;
     private final ProductSearchService productSearchService;
 
+    // TODO: Tách sang Search Service — endpoint search sản phẩm không thuộc Product Service
     @GetMapping("/products/search")
     public ResponseEntity<ApiResponse<PageSearchProductResponse>> searchProduct(
             @RequestParam(required = false) String q,
@@ -52,6 +53,7 @@ public class ProductController {
         );
     }
 
+    // TODO: Tách sang Search Service — endpoint suggest/autocomplete không thuộc Product Service
     @GetMapping("/products/search/suggest")
     public ResponseEntity<ApiResponse<List<String>>> suggestProduct(
             @RequestParam String q,
