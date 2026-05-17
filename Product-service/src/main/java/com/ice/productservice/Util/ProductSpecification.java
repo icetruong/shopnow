@@ -3,15 +3,16 @@ package com.ice.productservice.Util;
 import com.ice.productservice.Entity.Product;
 import org.springframework.data.jpa.domain.Specification;
 
+import java.util.List;
 import java.util.UUID;
 
 public class ProductSpecification {
-    public static Specification<Product> hasCategoryId(String categoryId)
+    public static Specification<Product> hasCategoryIds(List<UUID> categoryIds)
     {
         return (root, query, cb) ->
-                categoryId == null
-                ? null
-                        : cb.equal(root.get("category").get("id"), UUID.fromString(categoryId));
+                categoryIds == null || categoryIds.isEmpty()
+                        ? null
+                        : root.get("category").get("id").in(categoryIds);
     }
 
     public static Specification<Product> hasMinPrice(Long minPrice)

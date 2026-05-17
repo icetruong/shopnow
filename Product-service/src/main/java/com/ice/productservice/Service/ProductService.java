@@ -57,8 +57,10 @@ public class ProductService {
         if(minPrice != null && maxPrice != null && minPrice > maxPrice)
             throw new IllegalArgumentException("min price greater than max price");
 
+        List<UUID> categoryIds = categoryId == null ? null : collectionIds(UUID.fromString(categoryId));
+
         Specification<Product> spec = Specification.where(ProductSpecification.isNotDeleted())
-                .and(ProductSpecification.hasCategoryId(categoryId))
+                .and(ProductSpecification.hasCategoryIds(categoryIds))
                 .and(ProductSpecification.hasMaxPrice(maxPrice))
                 .and(ProductSpecification.hasMinPrice(minPrice))
                 .and(ProductSpecification.hasActive(isActive));
@@ -333,6 +335,25 @@ public class ProductService {
             }
             return null;
         });
+    }
+
+    private List<UUID> collectionIds(UUID categoryId)
+    {
+        List<UUID> frontier = new ArrayList<>();
+        List<UUID> explored = new ArrayList<>();
+        frontier.add(categoryId);
+        explored.add(categoryId);
+
+        while(!frontier.isEmpty())
+        {
+            UUID currentParentId = frontier.getFirst();
+            frontier.removeFirst();
+            List<UUID> childrenIds = categoryRepo.findIdsByParentId(currentParentId);
+            frontier.addAll(childrenIds);
+            explored.addAll(childrenIds);
+        }
+
+        return explored;
     }
 
 }
