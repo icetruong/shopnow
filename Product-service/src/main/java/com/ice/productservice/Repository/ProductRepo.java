@@ -9,10 +9,14 @@ import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
 public interface ProductRepo extends JpaRepository<Product, UUID>, JpaSpecificationExecutor<Product> {
+    @EntityGraph(attributePaths = {"productImages", "productVariants", "category"})
+    @NonNull
+    List<Product> findAll();
     @EntityGraph(attributePaths = {"productImages", "category"})
     @NonNull
     Page<Product> findAll(Specification<Product> spec, Pageable pageable);

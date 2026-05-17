@@ -8,7 +8,9 @@ import com.ice.productservice.DTO.Response.Product.PageProductResponse;
 import com.ice.productservice.DTO.Response.Product.ProductCreatedResponse;
 import com.ice.productservice.DTO.Response.Product.ProductDetailResponse;
 import com.ice.productservice.DTO.Response.Product.VariantProductResponse;
+import com.ice.productservice.DTO.Response.Search.PageSearchProductResponse;
 import com.ice.productservice.Service.ProductImageService;
+import com.ice.productservice.Service.ProductSearchService;
 import com.ice.productservice.Service.ProductService;
 import com.ice.productservice.Service.ProductVariantService;
 import jakarta.validation.Valid;
@@ -28,6 +30,43 @@ public class ProductController {
     private final ProductService productService;
     private final ProductVariantService productVariantService;
     private final ProductImageService productImageService;
+    private final ProductSearchService productSearchService;
+
+    @GetMapping("/products/search")
+    public ResponseEntity<ApiResponse<PageSearchProductResponse>> searchProduct(
+            @RequestParam(required = false) String q,
+            @RequestParam(defaultValue = "0") Integer page,
+            @RequestParam(defaultValue = "20") Integer size,
+            @RequestParam(required = false) String categoryId,
+            @RequestParam(required = false) Long minPrice,
+            @RequestParam(required = false) Long maxPrice,
+            @RequestParam(required = false) String color,
+            @RequestParam(value = "sizeFilter", required = false) String sizeFilter,
+            @RequestParam(defaultValue = "relevance") String sort
+    ) {
+        return ResponseEntity.ok(
+                ApiResponse.success(
+                        "retrieved successfully",
+                        productSearchService.search(q, page, size, categoryId, minPrice, maxPrice, color, sizeFilter, sort)
+                )
+        );
+    }
+
+    @GetMapping("/products/search/suggest")
+    public ResponseEntity<ApiResponse<List<String>>> suggestProduct(
+            @RequestParam String q,
+            @RequestParam(defaultValue = "5") Integer size
+    )
+    {
+        return ResponseEntity.ok(
+                ApiResponse.success(
+                        "retrieved successfully",
+                        productSearchService.suggest(q, size)
+                )
+        );
+
+    }
+
 
     @GetMapping("/products")
     public ResponseEntity<ApiResponse<PageProductResponse>> getAllProduct(

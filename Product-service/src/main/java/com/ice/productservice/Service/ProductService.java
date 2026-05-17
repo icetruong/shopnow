@@ -39,6 +39,7 @@ public class ProductService {
     private final CategoryRepo categoryRepo;
     private final ProductAttributeService productAttributeService;
     private final ProductVariantService productVariantService;
+    private final ProductSyncService productSyncService;
     private final RedisTemplate<String, Object> redisTemplate;
 
 
@@ -114,6 +115,7 @@ public class ProductService {
         Product save = productRepo.save(product);
         productAttributeService.createProductAttribute(productRequest.getAttributes(), save);
         productVariantService.createProductVariant(productRequest.getVariants(), save);
+        productSyncService.indexProduct(save);
 
         invalidateListCache();
 
@@ -144,10 +146,12 @@ public class ProductService {
         Product save = productRepo.save(product);
         productAttributeService.deleteAllProductAttributeByProduct(save);
         productAttributeService.createProductAttribute(productRequest.getAttributes(), save);
+        productSyncService.indexProduct(save);
 
         invalidateListCache();
     }
 
+    @Transactional
     @CacheEvict(value = "products", allEntries = true)
     public void setIsActive(UUID id, ProductSetIsActiveRequest request)
     {
@@ -156,6 +160,7 @@ public class ProductService {
 
         product.setIsActive(request.getIsActive());
         productRepo.save(product);
+        productSyncService.indexProduct(product);
 
         invalidateListCache();
     }
@@ -169,6 +174,7 @@ public class ProductService {
 
         product.setIsDelete(true);
         productRepo.save(product);
+        productSyncService.deleteProduct(product.getId().toString());
 
         invalidateListCache();
     }
@@ -195,8 +201,8 @@ public class ProductService {
             return new ProductRatingInternalResponse(false);
 
         product.setRating(request.getAvgRating());
-
         productRepo.save(product);
+        productSyncService.indexProduct(product);
 
         return new ProductRatingInternalResponse(true);
     }
