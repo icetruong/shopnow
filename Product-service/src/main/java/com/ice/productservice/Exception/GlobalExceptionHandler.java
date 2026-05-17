@@ -71,4 +71,17 @@ public class GlobalExceptionHandler {
                 .body(ApiResponse.fail(ex.getMessage(), "INVALID_FILE_TYPE"));
     }
 
+    @ExceptionHandler(FileTooLargeException.class)
+    public ResponseEntity<ApiResponse<Void>> handleFileTooLarge(FileTooLargeException ex) {
+        return ResponseEntity.badRequest()
+                .body(ApiResponse.fail(ex.getMessage(), "FILE_TOO_LARGE"));
+    }
+
+    @ExceptionHandler(AlreadyExistsException.class)
+    public ResponseEntity<ApiResponse<Void>> handleAlreadyExists(AlreadyExistsException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(ApiResponse.fail(ex.getMessage(), "ALREADY_EXISTS"));
+    }
+
+
 }

@@ -8,6 +8,7 @@ import com.ice.productservice.DTO.Response.Internal.ProductInternalResponse;
 import com.ice.productservice.DTO.Response.Internal.ProductRatingInternalResponse;
 import com.ice.productservice.DTO.Response.Product.*;
 import com.ice.productservice.Entity.*;
+import com.ice.productservice.Exception.AlreadyExistsException;
 import com.ice.productservice.Exception.ResourceNotFoundException;
 import com.ice.productservice.Repository.*;
 import com.ice.productservice.Util.ProductSpecification;
@@ -103,6 +104,9 @@ public class ProductService {
         Category category = categoryRepo.findById(UUID.fromString(productRequest.getCategoryId()))
                 .orElseThrow(() -> new ResourceNotFoundException("category not found"));
 
+        if (productRepo.existsBySlug(productRequest.getSlug()))
+            throw new AlreadyExistsException("Slug đã được sử dụng.");
+
         Product product = Product.builder()
                 .name(productRequest.getName())
                 .slug(productRequest.getSlug())
@@ -136,6 +140,8 @@ public class ProductService {
 
         Category category = categoryRepo.findById(UUID.fromString(productRequest.getCategoryId()))
                 .orElseThrow(() -> new ResourceNotFoundException("category not found"));
+        if (!product.getSlug().equals(productRequest.getSlug()) && productRepo.existsBySlug(productRequest.getSlug()))
+            throw new AlreadyExistsException("Slug đã được sử dụng.");
 
         product.setName(productRequest.getName());
         product.setSlug(productRequest.getSlug());
@@ -207,6 +213,7 @@ public class ProductService {
             return new ProductRatingInternalResponse(false);
 
         product.setRating(request.getAvgRating());
+        product.setReviewCount(request.getTotalReviews().intValue());
         Product save = productRepo.save(product);
         productSyncService.indexProduct(product);
         kafkaProducerService.publish(save);

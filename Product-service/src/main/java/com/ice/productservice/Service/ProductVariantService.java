@@ -7,6 +7,7 @@ import com.ice.productservice.DTO.Response.Internal.ProductVariantInternalRespon
 import com.ice.productservice.DTO.Response.Product.VariantProductResponse;
 import com.ice.productservice.Entity.Product;
 import com.ice.productservice.Entity.ProductVariant;
+import com.ice.productservice.Exception.AlreadyExistsException;
 import com.ice.productservice.Exception.ResourceNotFoundException;
 import com.ice.productservice.Exception.VariantInActiveOrderException;
 import com.ice.productservice.Repository.ProductRepo;
@@ -30,6 +31,9 @@ public class ProductVariantService {
         List<ProductVariant> productVariants = new ArrayList<>();
         for(VariantProductRequest request : requests)
         {
+            if (productVariantRepo.existsBySku(request.getSku()))
+                throw new AlreadyExistsException("SKU đã tồn tại.");
+
             // request.getStockQty() không được gọi ở đây → vì sẽ cho qua inventory service
             productVariants.add(ProductVariant.builder()
                     .product(product)
@@ -47,6 +51,10 @@ public class ProductVariantService {
     {
         Product product = productRepo.findById(productId)
                 .orElseThrow(() -> new ResourceNotFoundException("not found product"));
+
+        if (productVariantRepo.existsBySku(request.getSku()))
+            throw new AlreadyExistsException("SKU đã tồn tại.");
+
         // request.getStockQty() không được gọi ở đây → vì sẽ cho qua inventory service
         ProductVariant productVariant = ProductVariant.builder()
                 .product(product)

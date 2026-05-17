@@ -126,12 +126,21 @@ Xóa danh mục. Không xóa được nếu còn sản phẩm thuộc danh mục
 }
 ```
 
-**Response 409**
+**Response 409 — Còn sản phẩm**
 ```json
 {
   "success": false,
   "code":    "CATEGORY_HAS_PRODUCTS",
   "message": "Không thể xóa danh mục đang có sản phẩm."
+}
+```
+
+**Response 409 — Còn danh mục con**
+```json
+{
+  "success": false,
+  "code":    "CATEGORY_HAS_CHILDREN",
+  "message": "Không thể xóa danh mục đang có danh mục con."
 }
 ```
 
@@ -712,16 +721,15 @@ Review Service gọi sau khi có review mới để cập nhật điểm trung b
 
 | Code | HTTP | Ý nghĩa |
 |------|------|---------|
-| `PRODUCT_NOT_FOUND` | 404 | Sản phẩm không tồn tại |
-| `SLUG_ALREADY_EXISTS` | 409 | Slug đã được dùng |
-| `SKU_ALREADY_EXISTS` | 409 | SKU đã tồn tại |
-| `CATEGORY_NOT_FOUND` | 404 | Danh mục không tồn tại |
+| `NOT_FOUND` | 404 | Resource không tồn tại (sản phẩm, danh mục, variant, ảnh) |
+| `ALREADY_EXISTS` | 409 | Slug hoặc SKU đã tồn tại |
 | `CATEGORY_HAS_PRODUCTS` | 409 | Xóa danh mục đang có sản phẩm |
-| `MAX_IMAGES_EXCEEDED` | 400 | Quá 10 ảnh / sản phẩm |
+| `CATEGORY_HAS_CHILDREN` | 409 | Xóa danh mục đang có danh mục con |
+| `TOO_MANY_IMAGES` | 400 | Quá 10 ảnh / sản phẩm |
 | `INVALID_FILE_TYPE` | 400 | File không phải JPG/PNG/WEBP |
 | `FILE_TOO_LARGE` | 400 | File quá 5MB |
-| `VARIANT_NOT_FOUND` | 404 | Variant không tồn tại |
 | `VARIANT_IN_ACTIVE_ORDER` | 409 | Variant đang trong đơn hàng |
+| `INVALID_REQUEST` | 400 | Dữ liệu request không hợp lệ (validation fail) |
 
 ---
 

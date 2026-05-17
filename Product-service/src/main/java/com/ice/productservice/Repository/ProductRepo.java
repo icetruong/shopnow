@@ -1,6 +1,8 @@
 package com.ice.productservice.Repository;
 
 import com.ice.productservice.Entity.Product;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Pattern;
 import lombok.NonNull;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -30,4 +32,5 @@ public interface ProductRepo extends JpaRepository<Product, UUID>, JpaSpecificat
     @NonNull
     Optional<Product> findById(UUID id);
 
+    boolean existsBySlug(String slug);
 }

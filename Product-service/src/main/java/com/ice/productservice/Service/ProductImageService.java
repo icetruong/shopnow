@@ -5,6 +5,7 @@ import com.ice.productservice.DTO.Request.Image.OrderImageRequest;
 import com.ice.productservice.DTO.Response.Image.ImageUploadResponse;
 import com.ice.productservice.Entity.Product;
 import com.ice.productservice.Entity.ProductImage;
+import com.ice.productservice.Exception.FileTooLargeException;
 import com.ice.productservice.Exception.InvalidFileTypeException;
 import com.ice.productservice.Exception.ResourceNotFoundException;
 import com.ice.productservice.Exception.TooManyImagesException;
@@ -43,7 +44,7 @@ public class ProductImageService {
             if(!ALLOWED_TYPES.contains(file.getContentType()))
                 throw new InvalidFileTypeException("only JPG, PNG, WEBP are allowed");
             if(file.getSize() > MAX_SIZE)
-                throw new InvalidFileTypeException("file size must not exceed 5MB");
+                throw new FileTooLargeException("file size must not exceed 5MB");
         }
 
         List<ImageUploadResponse> responses = new ArrayList<>();
