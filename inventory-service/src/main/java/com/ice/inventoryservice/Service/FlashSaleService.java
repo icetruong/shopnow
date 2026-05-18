@@ -5,6 +5,7 @@ import com.ice.inventoryservice.DTO.Request.Inventory.FlashSaleReserveRequest;
 import com.ice.inventoryservice.DTO.Response.Inventory.FlashSaleReserveResponse;
 import com.ice.inventoryservice.Enum.ErrorCode;
 import com.ice.inventoryservice.Exception.FlashSaleSoldOutException;
+import com.ice.inventoryservice.Exception.FlashSaleUserLimitException;
 import com.ice.inventoryservice.Exception.ResourceNotFoundException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -34,7 +35,7 @@ public class FlashSaleService {
             throw new ResourceNotFoundException("flash sale not active", ErrorCode.FLASH_SALE_NOT_FOUND);
 
         if(Boolean.TRUE.equals(redisTemplate.hasKey(userKey)))
-            throw new FlashSaleSoldOutException("user have bought it");
+            throw new FlashSaleUserLimitException();
 
         Long remaining = redisTemplate.opsForValue().decrement(stockKey);
 

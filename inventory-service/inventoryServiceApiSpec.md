@@ -282,6 +282,7 @@ status    = LOW_STOCK       (IN_STOCK | LOW_STOCK | OUT_OF_STOCK)
 ```json
 {
   "success": true,
+  "message": "Lấy danh sách tồn kho thành công.",
   "data": {
     "content": [
       {
@@ -323,11 +324,14 @@ Nhập thêm hàng (nhập kho).
 ```json
 {
   "success":      true,
-  "variantId":    "var-uuid-1",
-  "previousQty":  50,
-  "importedQty":  100,
-  "currentQty":   150,
-  "updatedAt":    "2024-01-15T14:00:00Z"
+  "message": "Nhập hàng thành công.",
+  "data": {
+    "variantId":    "var-uuid-1",
+    "previousQty":  50,
+    "importedQty":  100,
+    "currentQty":   150,
+    "updatedAt":    "2024-01-15T14:00:00Z"
+  }
 }
 ```
 
@@ -350,11 +354,14 @@ Nhập thêm hàng (nhập kho).
 ```json
 {
   "success":      true,
-  "variantId":    "var-uuid-1",
-  "previousQty":  50,
-  "adjustedQty":  45,
-  "difference":   -5,
-  "updatedAt":    "2024-01-15T14:00:00Z"
+  "message": "Điều chỉnh tồn kho thành công.",
+  "data": { 
+    "variantId":    "var-uuid-1",
+    "previousQty":  50,
+    "adjustedQty":  45,
+    "difference":   -5,
+    "updatedAt":    "2024-01-15T14:00:00Z"
+  }
 }
 ```
 
@@ -378,6 +385,7 @@ type      = IMPORT    (IMPORT | DEDUCT | RELEASE | ADJUSTMENT | FLASH_SALE)
 ```json
 {
   "success": true,
+  "message": "Lấy lịch sử biến động tồn kho thành công.", 
   "data": {
     "content": [
       {

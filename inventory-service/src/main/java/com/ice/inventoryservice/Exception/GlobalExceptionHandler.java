@@ -2,6 +2,7 @@ package com.ice.inventoryservice.Exception;
 
 import com.ice.inventoryservice.DTO.Response.Common.ApiResponse;
 import com.ice.inventoryservice.DTO.Response.Inventory.ReserveResponseFail;
+import com.ice.inventoryservice.Exception.FlashSaleUserLimitException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -57,5 +58,12 @@ public class GlobalExceptionHandler {
     {
         return ResponseEntity.status(HttpStatus.CONFLICT)
                 .body(ApiResponse.fail(ex.getMessage(), "FLASH_SALE_SOLD_OUT"));
+    }
+
+    @ExceptionHandler(FlashSaleUserLimitException.class)
+    public ResponseEntity<ApiResponse<Void>> handleFlashSaleUserLimit(FlashSaleUserLimitException ex)
+    {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(ApiResponse.fail(ex.getMessage(), "FLASH_SALE_USER_LIMIT"));
     }
 }

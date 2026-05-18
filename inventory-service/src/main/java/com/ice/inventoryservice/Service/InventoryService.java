@@ -1,6 +1,8 @@
 package com.ice.inventoryservice.Service;
 
 import com.ice.inventoryservice.DTO.Request.Inventory.*;
+import com.ice.inventoryservice.DTO.Response.Admin.PageStockResponse;
+import com.ice.inventoryservice.DTO.Response.Admin.StockResponse;
 import com.ice.inventoryservice.DTO.Response.Inventory.*;
 import com.ice.inventoryservice.Entity.Inventory;
 import com.ice.inventoryservice.Entity.StockReservation;
@@ -9,7 +11,11 @@ import com.ice.inventoryservice.Enum.StockStatus;
 import com.ice.inventoryservice.Exception.InsufficientStockException;
 import com.ice.inventoryservice.Exception.ResourceNotFoundException;
 import com.ice.inventoryservice.Repository.InventoryRepo;
+import com.ice.inventoryservice.Util.InventorySpecification;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -195,4 +201,35 @@ public class InventoryService {
     }
 
 
+    public PageStockResponse getStockForAdmin(Integer page, Integer size, UUID variantId, UUID productId, StockStatus status)
+    {
+        Specification<Inventory> specification = Specification.where(InventorySpecification.hasVariantId(variantId))
+                .and(InventorySpecification.hasStatus(status));
+
+        Page<Inventory> inventoryPage = inventoryRepo.findAll(specification, PageRequest.of(page, size));
+
+        List<StockResponse> stockResponses = inventoryPage.get().map(
+                inventory -> new StockResponse(
+                        inventory.getVariantId().toString(),
+                        inventory.getSku(),
+                        null,
+                        null,
+                        null,
+                        inventory.getStockQty(),
+                        inventory.getReservedQty(),
+                        inventory.getAvailableQty(),
+                        inventory.getSoldQty(),
+                        inventory.getAvailableQty() > 10 ? StockStatus.IN_STOCK : inventory.getAvailableQty() > 0 ? StockStatus.LOW_STOCK : StockStatus.OUT_OF_STOCK,
+                        inventory.getUpdatedAt().toInstant(ZoneOffset.UTC)
+                )
+        ).toList();
+
+        return new PageStockResponse(
+                stockResponses,
+                inventoryPage.getNumber(),
+                inventoryPage.getSize(),
+                inventoryPage.getTotalElements(),
+                inventoryPage.getTotalPages()
+        );
+    }
 }
