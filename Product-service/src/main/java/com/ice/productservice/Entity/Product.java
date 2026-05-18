@@ -34,7 +34,7 @@ public class Product {
     @Column(name = "name", nullable = false, length = 255)
     private String name;
 
-    @Column(name = "slug", nullable = false, unique = true, length = 300)
+    @Column(name = "slug", nullable = false, length = 300)
     private String slug;
 
     @Column(name = "description", columnDefinition = "TEXT")

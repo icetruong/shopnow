@@ -28,7 +28,7 @@ public class Category {
     @Column(name = "name", nullable = false, length = 100)
     private String name;
 
-    @Column(name = "slug", nullable = false, unique = true, length = 120)
+    @Column(name = "slug", nullable = false, length = 120)
     private String slug;
 
     @ManyToOne(fetch = FetchType.LAZY)

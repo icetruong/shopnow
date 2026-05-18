@@ -30,7 +30,7 @@ public class ProductVariant {
     @JoinColumn(name = "product_id")
     private Product product;
 
-    @Column(name = "sku", nullable = false, unique = true, length = 100)
+    @Column(name = "sku", nullable = false, length = 100)
     private String sku;
 
     @Column(name = "color", length = 50)
