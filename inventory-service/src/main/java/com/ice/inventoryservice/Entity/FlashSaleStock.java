@@ -37,10 +37,10 @@ public class FlashSaleStock {
     @Column(name = "variant_id", nullable = false)
     private UUID variantId;
 
-    @Column(name = "initialQty", nullable = false)
+    @Column(name = "initial_qty", nullable = false)
     private Integer initialQty;
 
-    @Column(name = "soldQty", nullable = false)
+    @Column(name = "sold_qty", nullable = false)
     @Builder.Default
     private Integer soldQty = 0;
 
@@ -50,7 +50,7 @@ public class FlashSaleStock {
     @Column(name = "ends_at", nullable = false)
     private LocalDateTime endsAt;
 
-    @Column(name = "qty", nullable = false, updatable = false)
+    @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
     @PrePersist

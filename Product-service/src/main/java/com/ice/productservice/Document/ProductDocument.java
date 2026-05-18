@@ -62,7 +62,7 @@ public class ProductDocument {
     private Boolean isActive;
 
     @Field(type = FieldType.Boolean)
-    private Boolean isDelete;
+    private Boolean isDeleted;
 
     @Field(type = FieldType.Date, format = DateFormat.date_optional_time)
     private LocalDateTime createdAt;

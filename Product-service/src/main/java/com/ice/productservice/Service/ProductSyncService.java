@@ -59,7 +59,7 @@ public class ProductSyncService {
                 .colors(colors)
                 .sizes(sizes)
                 .isActive(product.getIsActive())
-                .isDelete(product.getIsDelete())
+                .isDeleted(product.getIsDeleted())
                 .createdAt(product.getCreatedAt())
                 .build();
 

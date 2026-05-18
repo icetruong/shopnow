@@ -50,7 +50,7 @@ public class UserAddress {
 
     @Column(name = "is_default", nullable = false)
     @Builder.Default
-    private Boolean isDefault = true;
+    private Boolean isDefault = false;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;

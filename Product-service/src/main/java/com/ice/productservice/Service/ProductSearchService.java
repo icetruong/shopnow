@@ -49,7 +49,7 @@ public class ProductSearchService {
             }
 
             b.filter(f -> f.term(t -> t.field("isActive").value(true)));
-            b.filter(f -> f.term(t -> t.field("isDelete").value(false)));
+            b.filter(f -> f.term(t -> t.field("isDeleted").value(false)));
 
             if (categoryId != null)
                 b.filter(f -> f.term(t -> t.field("categoryId").value(categoryId)));
@@ -190,7 +190,7 @@ public class ProductSearchService {
                                             .type(TextQueryType.BoolPrefix)
                                     ));
                             b.filter(f -> f.term(t -> t.field("isActive").value(true)));
-                            b.filter(f -> f.term(t -> t.field("isDelete").value(false)));
+                            b.filter(f -> f.term(t -> t.field("isDeleted").value(false)));
 
                             return b;
                         }

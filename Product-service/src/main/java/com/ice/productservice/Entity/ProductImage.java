@@ -39,15 +39,15 @@ public class ProductImage {
     @Column(name = "alt_text", length = 255)
     private String altText;
 
-    @Column(name = "sort_order")
+    @Column(name = "sort_order", nullable = false)
     @Builder.Default
     private Integer sortOrder = 0;
 
-    @Column(name = "is_primary")
+    @Column(name = "is_primary", nullable = false)
     @Builder.Default
     private Boolean isPrimary = false;
 
-    @Column(name = "createAt", updatable = false, nullable = false)
+    @Column(name = "created_at", updatable = false, nullable = false)
     private LocalDateTime createdAt;
 
     @PrePersist

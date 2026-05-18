@@ -41,7 +41,7 @@ public class ProductSpecification {
 
     public static Specification<Product> isNotDeleted() {
         return (root, query, cb) ->
-                cb.equal(root.get("isDelete"), false);
+                cb.equal(root.get("isDeleted"), false);
     }
 
 }

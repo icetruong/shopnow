@@ -55,7 +55,7 @@ public class StockTransaction {
     @Column(name = "created_by")
     private UUID createdBy;
 
-    @Column(name = "createdAt", nullable = false, updatable = false)
+    @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
     @PrePersist

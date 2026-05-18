@@ -9,7 +9,13 @@ import java.time.LocalDateTime;
 import java.util.UUID;
 
 @Entity
-@Table(name = "product_variants", indexes = {
+@Table(
+        name = "product_variants",
+        uniqueConstraints = {
+                @UniqueConstraint(name = "uq_variant_product_color_size",
+                        columnNames = {"product_id", "color", "size"})
+        },
+        indexes = {
         @Index(name = "idx_variants_sku", columnList = "sku", unique = true),
         @Index(name = "idx_variants_product_id", columnList = "product_id"),
         @Index(name = "idx_variants_color", columnList = "color"),
@@ -27,7 +33,7 @@ public class ProductVariant {
     private UUID id;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "product_id")
+    @JoinColumn(name = "product_id",nullable = false)
     private Product product;
 
     @Column(name = "sku", nullable = false, length = 100)
@@ -42,7 +48,7 @@ public class ProductVariant {
     @Column(name = "price", nullable = false)
     private Long price;
 
-    @Column(name = "image_url")
+    @Column(name = "image_url", columnDefinition = "TEXT" )
     private String imageUrl;
 
     @Column(name = "is_active", nullable = false)

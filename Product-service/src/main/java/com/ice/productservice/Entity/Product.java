@@ -14,7 +14,7 @@ import java.util.UUID;
 @Table(name = "products", indexes = {
         @Index(name = "idx_products_slug", columnList = "slug", unique = true),
         @Index(name = "idx_products_category_id", columnList = "category_id"),
-        @Index(name = "idx_products_is_active_is_deleted", columnList = "is_active, is_deleted"),
+        @Index(name = "idx_products_is_active_deleted", columnList = "is_active, is_deleted"),
         @Index(name = "idx_products_sale_price", columnList = "sale_price"),
         @Index(name = "idx_products_rating", columnList = "rating"),
         @Index(name = "idx_products_sold_count", columnList = "sold_count")
@@ -67,9 +67,9 @@ public class Product {
     @Builder.Default
     private Boolean isActive = false;
 
-    @Column(name = "is_delete", nullable = false)
+    @Column(name = "is_deleted", nullable = false)
     @Builder.Default
-    private Boolean isDelete = false;
+    private Boolean isDeleted = false;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
