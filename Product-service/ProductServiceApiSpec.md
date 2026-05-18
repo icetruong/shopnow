@@ -29,6 +29,7 @@ Lấy toàn bộ cây danh mục (có phân cấp cha - con).
 ```json
 {
   "success": true,
+  "message": "retrieved successfully",
   "data": [
     {
       "categoryId": "cat-uuid-1",
@@ -90,6 +91,7 @@ Tạo danh mục mới.
 ```json
 {
   "success": true,
+  "message": "created successfully",
   "data": {
     "categoryId": "cat-uuid-5",
     "name":       "Giày dép",
@@ -109,7 +111,7 @@ Cập nhật danh mục.
 ```json
 {
   "success": true,
-  "message": "Cập nhật danh mục thành công."
+  "message": "updated successfully"
 }
 ```
 
@@ -122,25 +124,25 @@ Xóa danh mục. Không xóa được nếu còn sản phẩm thuộc danh mục
 ```json
 {
   "success": true,
-  "message": "Đã xóa danh mục."
+  "message": "deleted successfully"
 }
 ```
 
 **Response 409 — Còn sản phẩm**
 ```json
 {
-  "success": false,
-  "code":    "CATEGORY_HAS_PRODUCTS",
-  "message": "Không thể xóa danh mục đang có sản phẩm."
+  "success":   false,
+  "errorCode": "CATEGORY_HAS_PRODUCTS",
+  "message":   "Không thể xóa danh mục đang có sản phẩm."
 }
 ```
 
 **Response 409 — Còn danh mục con**
 ```json
 {
-  "success": false,
-  "code":    "CATEGORY_HAS_CHILDREN",
-  "message": "Không thể xóa danh mục đang có danh mục con."
+  "success":   false,
+  "errorCode": "CATEGORY_HAS_CHILDREN",
+  "message":   "Không thể xóa danh mục đang có danh mục con."
 }
 ```
 
@@ -169,6 +171,7 @@ isActive    = true
 ```json
 {
   "success": true,
+  "message": "retrieved successfully",
   "data": {
     "content": [
       {
@@ -207,6 +210,7 @@ Lấy chi tiết sản phẩm kèm toàn bộ variant và ảnh. Cache theo slug
 ```json
 {
   "success": true,
+  "message": "retrieved successfully",
   "data": {
     "productId":   "prod-uuid-1",
     "name":        "Áo Polo Nam Basic",
@@ -328,6 +332,7 @@ Tạo sản phẩm mới (chưa có ảnh, ảnh upload riêng).
 ```json
 {
   "success": true,
+  "message": "created successfully",
   "data": {
     "productId": "prod-uuid-1",
     "slug":      "ao-polo-nam-basic"
@@ -348,7 +353,7 @@ Cập nhật thông tin sản phẩm (không bao gồm ảnh, không bao gồm v
 ```json
 {
   "success": true,
-  "message": "Cập nhật sản phẩm thành công."
+  "message": "updated successfully"
 }
 ```
 
@@ -370,7 +375,7 @@ Bật/tắt hiển thị sản phẩm.
 ```json
 {
   "success": true,
-  "message": "Đã cập nhật trạng thái sản phẩm."
+  "message": "updated successfully"
 }
 ```
 
@@ -383,7 +388,7 @@ Xóa mềm sản phẩm (soft delete — set `isActive = false`, không xóa kh�
 ```json
 {
   "success": true,
-  "message": "Đã xóa sản phẩm."
+  "message": "deleted successfully"
 }
 ```
 
@@ -413,10 +418,11 @@ Thêm variant mới vào sản phẩm đã có.
 - `price`: > 0
 - `stockQty`: >= 0
 
-**Response 201**
+**Response 200**
 ```json
 {
   "success": true,
+  "message": "added successfully",
   "data": {
     "variantId": "var-uuid-4"
   }
@@ -440,7 +446,7 @@ Cập nhật thông tin variant (giá, ảnh). Không cho phép đổi SKU.
 ```json
 {
   "success": true,
-  "message": "Cập nhật variant thành công."
+  "message": "updated successfully"
 }
 ```
 
@@ -453,16 +459,16 @@ Xóa variant. Không xóa được nếu variant đang có trong đơn hàng đa
 ```json
 {
   "success": true,
-  "message": "Đã xóa variant."
+  "message": "deleted successfully"
 }
 ```
 
 **Response 409**
 ```json
 {
-  "success": false,
-  "code":    "VARIANT_IN_ACTIVE_ORDER",
-  "message": "Không thể xóa variant đang có trong đơn hàng chưa hoàn thành."
+  "success":   false,
+  "errorCode": "VARIANT_IN_ACTIVE_ORDER",
+  "message":   "Không thể xóa variant đang có trong đơn hàng chưa hoàn thành."
 }
 ```
 
@@ -489,6 +495,7 @@ altTexts:  ["Ảnh mặt trước", "Ảnh mặt sau"]   (optional, JSON array s
 ```json
 {
   "success": true,
+  "message": "uploaded successfully",
   "data": [
     {
       "imageId":   "img-uuid-3",
@@ -519,7 +526,7 @@ Client → POST /images (multipart)
 ```json
 {
   "success": true,
-  "message": "Đã đặt làm ảnh đại diện."
+  "message": "updated successfully"
 }
 ```
 
@@ -543,7 +550,7 @@ Sắp xếp lại thứ tự ảnh.
 ```json
 {
   "success": true,
-  "message": "Đã cập nhật thứ tự ảnh."
+  "message": "sorted successfully"
 }
 ```
 
@@ -556,7 +563,7 @@ Xóa ảnh — xóa cả file trên MinIO/S3 và record trong DB.
 ```json
 {
   "success": true,
-  "message": "Đã xóa ảnh."
+  "message": "deleted successfully"
 }
 ```
 
@@ -586,6 +593,7 @@ sort        = relevance          (relevance | price_asc | price_desc | newest | 
 ```json
 {
   "success": true,
+  "message": "retrieved successfully",
   "data": {
     "content": [
       {
@@ -646,6 +654,7 @@ size = 5          (số gợi ý, default 5, max 10)
 ```json
 {
   "success": true,
+  "message": "retrieved successfully",
   "data": [
     "Áo Polo Nam Basic",
     "Áo Polo Nam Cao Cấp",

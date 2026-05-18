@@ -25,7 +25,7 @@ public class CategoryController {
     public ResponseEntity<ApiResponse<List<CategoryResponse>>> getAllCategory()
     {
         return ResponseEntity.ok(ApiResponse.success(
-                "lấy thành công",
+                "retrieved successfully",
                 categoryService.getAllCategory()
         ));
     }
@@ -35,7 +35,7 @@ public class CategoryController {
     {
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(ApiResponse.success(
-                        "tạo thành công",
+                        "created successfully",
                         categoryService.addCategory(categoryRequest)
                 ));
     }
@@ -46,7 +46,7 @@ public class CategoryController {
         categoryService.updateCategory(id,request);
         return ResponseEntity.ok(
                 ApiResponse.success(
-                        "cập nhập thành công",
+                        "updated successfully",
                         null
                 )
         );
@@ -58,7 +58,7 @@ public class CategoryController {
         categoryService.deleteCategory(id);
         return ResponseEntity.ok(
                 ApiResponse.success(
-                        "xóa thành công",
+                        "deleted successfully",
                         null
                 )
         );
