@@ -9,7 +9,6 @@ import com.ice.inventoryservice.Enum.StockStatus;
 import com.ice.inventoryservice.Exception.InsufficientStockException;
 import com.ice.inventoryservice.Exception.ResourceNotFoundException;
 import com.ice.inventoryservice.Repository.InventoryRepo;
-import com.ice.inventoryservice.Repository.StockReservationRepo;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -26,6 +25,7 @@ public class InventoryService {
 
     private final InventoryRepo inventoryRepo;
     private final StockReservationService stockReservationService;
+    private final KafkaProducerService kafkaProducerService;
 
     public InventoryResponse getInventory(UUID variantId)
     {
@@ -89,12 +89,18 @@ public class InventoryService {
         }
         inventoryRepo.saveAll(inventories);
 
-        return new ReserveResponseSuccess(
+
+
+        ReserveResponseSuccess response = new ReserveResponseSuccess(
                 true,
                 request.getOrderId(),
                 now.toInstant(ZoneOffset.UTC),       // Instant
                 expiresAt.toInstant(ZoneOffset.UTC)
         );
+
+        kafkaProducerService.publishReservedEvent(response, request.getItems());
+
+        return response;
     }
 
     @Transactional
@@ -115,19 +121,27 @@ public class InventoryService {
 
         List<Inventory> inventories = inventoryRepo.findAllByVariantIdInOrderByVariantId(variantIds);
 
+        List<ItemReserveRequest> itemsKafka = new ArrayList<>();
+
         for(Inventory inventory : inventories)
         {
             Integer qty = itemsMap.get(inventory.getVariantId());
             inventory.setReservedQty(inventory.getReservedQty() - qty);
+
+            itemsKafka.add(new ItemReserveRequest(inventory.getVariantId().toString(), qty));
         }
         stockReservationService.updateStatusRelease(stockReservations);
         inventoryRepo.saveAll(inventories);
 
-        return new ReleaseResponse(
+        ReleaseResponse response = new ReleaseResponse(
                 true,
                 request.getOrderId(),
                 Instant.now()
         );
+
+        kafkaProducerService.publishReleaseEvent(response, itemsKafka, request.getReason().toString());
+
+        return response;
     }
 
     @Transactional
@@ -156,7 +170,10 @@ public class InventoryService {
         }
         stockReservationService.updateStatusDeduct(stockReservations);
         inventoryRepo.saveAll(inventories);
-
+        for(Inventory inventory : inventories) {
+            if(inventory.getStockQty() < inventory.getLowStockThreshold())
+                kafkaProducerService.publishLowWarningEvent(inventory);
+        }
         return new DeductResponse(
                 true,
                 request.getOrderId(),

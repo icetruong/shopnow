@@ -243,7 +243,7 @@ Reserve hàng flash sale — dùng **Redis DECR atomic** thay vì DB lock để 
 ```json
 {
   "success": false,
-  "errorCode,":    "FLASH_SALE_SOLD_OUT",
+  "errorCode":    "FLASH_SALE_SOLD_OUT",
   "message": "Sản phẩm flash sale đã hết."
 }
 ```

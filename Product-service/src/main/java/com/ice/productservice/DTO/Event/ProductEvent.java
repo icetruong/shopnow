@@ -5,7 +5,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 
 @Getter
 @Setter
@@ -14,7 +14,7 @@ import java.time.LocalDateTime;
 public class ProductEvent {
     private String eventId;
     private String eventType;
-    private LocalDateTime timestamp;
+    private String timestamp;
     private String version;
     private ProductEventPayload payload;
 }

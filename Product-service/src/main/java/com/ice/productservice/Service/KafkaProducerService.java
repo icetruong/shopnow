@@ -9,6 +9,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
 
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Objects;
@@ -63,7 +64,7 @@ public class KafkaProducerService {
         ProductEvent event = new ProductEvent(
                 UUID.randomUUID().toString(),
                 TOPIC,
-                LocalDateTime.now(),
+                Instant.now().toString(),
                 "1.0",
                 payload
         );

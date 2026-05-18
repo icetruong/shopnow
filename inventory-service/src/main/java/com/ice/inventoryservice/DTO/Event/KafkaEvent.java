@@ -9,9 +9,10 @@ import lombok.Setter;
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
-public class KafkaEvent {
+public class KafkaEvent<T> {
     private String eventId;
     private String eventType;
     private String timestamp;
     private String version;
+    private T payload;
 }

@@ -1,9 +1,17 @@
 package com.ice.inventoryservice.Service;
 
-import com.ice.inventoryservice.DTO.Event.FlashSaleReservedEvent;
+import com.ice.inventoryservice.DTO.Event.*;
+import com.ice.inventoryservice.DTO.Request.Inventory.ItemReserveRequest;
+import com.ice.inventoryservice.DTO.Response.Inventory.ReleaseResponse;
+import com.ice.inventoryservice.DTO.Response.Inventory.ReserveResponseSuccess;
+import com.ice.inventoryservice.Entity.Inventory;
 import lombok.RequiredArgsConstructor;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
+
+import java.time.Instant;
+import java.util.List;
+import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
@@ -11,11 +19,67 @@ public class KafkaProducerService {
     private final KafkaTemplate<String, Object> kafkaTemplate;
     private static final String FLASH_SALE = "flash-sale-reserved";
     private static final String RESERVED = "stock.reserved";
+    private static final String RELEASE = "stock.released";
+    private static final String LOW_WARNING = "stock.low_warning";
 
     public void publishFlashSaleEvent(FlashSaleReservedEvent event)
     {
         kafkaTemplate.send(FLASH_SALE, event.getOrderId(), event);
     }
 
-    public void publishReservedEvent()
+    public void publishReservedEvent(ReserveResponseSuccess response, List<ItemReserveRequest> items)
+    {
+        ReservePayload payload = new ReservePayload(
+                response.getOrderId(),
+                response.getReservedAt(),
+                response.getExpiresAt(),
+                items
+        );
+        KafkaEvent<ReservePayload> kafkaEvent = new KafkaEvent<>(
+                UUID.randomUUID().toString(),
+                RESERVED,
+                Instant.now().toString(),
+                "1.0",
+                payload
+        );
+
+        kafkaTemplate.send(RESERVED, response.getOrderId(), kafkaEvent);
+    }
+
+    public void publishReleaseEvent(ReleaseResponse response, List<ItemReserveRequest> itemsKafka, String reason) {
+        ReleasePayload payload = new ReleasePayload(
+                response.getOrderId(),
+                reason,
+                response.getReleasedAt(),
+                itemsKafka
+        );
+        KafkaEvent<ReleasePayload> kafkaEvent = new KafkaEvent<>(
+                UUID.randomUUID().toString(),
+                RELEASE,
+                Instant.now().toString(),
+                "1.0",
+                payload
+        );
+
+        kafkaTemplate.send(RELEASE, response.getOrderId(), kafkaEvent);
+    }
+
+    public void publishLowWarningEvent(Inventory inventory)
+    {
+        LowWarningPayload payload = new LowWarningPayload(
+                inventory.getVariantId().toString(),
+                inventory.getSku(),
+                inventory.getStockQty(),
+                inventory.getLowStockThreshold()
+        );
+        KafkaEvent<LowWarningPayload> kafkaEvent = new KafkaEvent<>(
+                UUID.randomUUID().toString(),
+                LOW_WARNING,
+                Instant.now().toString(),
+                "1.0",
+                payload
+        );
+
+        kafkaTemplate.send(LOW_WARNING, payload.getVariantId(), kafkaEvent);
+    }
 }
