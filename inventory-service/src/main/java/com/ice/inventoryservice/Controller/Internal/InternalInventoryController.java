@@ -1,9 +1,11 @@
 package com.ice.inventoryservice.Controller.Internal;
 
 import com.ice.inventoryservice.DTO.Request.Inventory.GetInventoryByVariantRequest;
+import com.ice.inventoryservice.DTO.Request.Inventory.ReleaseRequest;
 import com.ice.inventoryservice.DTO.Request.Inventory.ReserveRequest;
 import com.ice.inventoryservice.DTO.Response.Inventory.GetInventoryByVariantResponse;
 import com.ice.inventoryservice.DTO.Response.Inventory.InventoryResponse;
+import com.ice.inventoryservice.DTO.Response.Inventory.ReleaseResponse;
 import com.ice.inventoryservice.DTO.Response.Inventory.ReserveResponseSuccess;
 import com.ice.inventoryservice.Service.InventoryService;
 import jakarta.validation.Valid;
@@ -44,4 +46,11 @@ public class InternalInventoryController {
         );
     }
 
+    @PostMapping("/stock/release")
+    public ResponseEntity<ReleaseResponse> release(@Valid @RequestBody ReleaseRequest request)
+    {
+        return ResponseEntity.ok(
+                inventoryService.releaseOrder(request)
+        );
+    }
 }

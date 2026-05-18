@@ -2,17 +2,17 @@ package com.ice.inventoryservice.Service;
 
 import com.ice.inventoryservice.DTO.Request.Inventory.GetInventoryByVariantRequest;
 import com.ice.inventoryservice.DTO.Request.Inventory.ItemReserveRequest;
+import com.ice.inventoryservice.DTO.Request.Inventory.ReleaseRequest;
 import com.ice.inventoryservice.DTO.Request.Inventory.ReserveRequest;
-import com.ice.inventoryservice.DTO.Response.Inventory.GetInventoryByVariantResponse;
-import com.ice.inventoryservice.DTO.Response.Inventory.InventoryResponse;
-import com.ice.inventoryservice.DTO.Response.Inventory.ItemReserveResponseFail;
-import com.ice.inventoryservice.DTO.Response.Inventory.ReserveResponseSuccess;
+import com.ice.inventoryservice.DTO.Response.Inventory.*;
 import com.ice.inventoryservice.Entity.Inventory;
+import com.ice.inventoryservice.Entity.StockReservation;
 import com.ice.inventoryservice.Enum.ErrorCode;
 import com.ice.inventoryservice.Enum.StockStatus;
 import com.ice.inventoryservice.Exception.InsufficientStockException;
 import com.ice.inventoryservice.Exception.ResourceNotFoundException;
 import com.ice.inventoryservice.Repository.InventoryRepo;
+import com.ice.inventoryservice.Repository.StockReservationRepo;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -97,6 +97,39 @@ public class InventoryService {
                 request.getOrderId(),
                 now.toInstant(ZoneOffset.UTC),       // Instant
                 expiresAt.toInstant(ZoneOffset.UTC)
+        );
+    }
+
+    @Transactional
+    public ReleaseResponse releaseOrder(ReleaseRequest request)
+    {
+        List<StockReservation> stockReservations = stockReservationService.getAllByOrderIdWithStatusRESERVED(request.getOrderId());
+
+        if (stockReservations.isEmpty())
+            throw new ResourceNotFoundException("no reserved stock found for orderId", ErrorCode.INVENTORY_NOT_FOUND);
+
+        Map<UUID, Integer> itemsMap = new HashMap<>();
+        List<UUID> variantIds = new ArrayList<>();
+        for(StockReservation item: stockReservations)
+        {
+            itemsMap.put(item.getVariantId(), item.getQty());
+            variantIds.add(item.getVariantId());
+        }
+
+        List<Inventory> inventories = inventoryRepo.findAllByVariantIdInOrderByVariantId(variantIds);
+
+        for(Inventory inventory : inventories)
+        {
+            Integer qty = itemsMap.get(inventory.getVariantId());
+            inventory.setReservedQty(inventory.getReservedQty() - qty);
+        }
+        stockReservationService.updateStatusRelease(stockReservations);
+        inventoryRepo.saveAll(inventories);
+
+        return new ReleaseResponse(
+                true,
+                request.getOrderId(),
+                Instant.now()
         );
     }
 

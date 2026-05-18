@@ -1,17 +1,19 @@
 package com.ice.inventoryservice.Service;
 
 import com.ice.inventoryservice.Entity.StockReservation;
+import com.ice.inventoryservice.Enum.StockReservationStatus;
 import com.ice.inventoryservice.Repository.StockReservationRepo;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
 public class StockReservationService {
-    private final StockReservationRepo reservationRepo;
+    private final StockReservationRepo stockReservationRepo;
 
     public void insertStockReservation(String orderId, String variantId, Integer qty, LocalDateTime expiresAt)
     {
@@ -22,6 +24,17 @@ public class StockReservationService {
                 .expiresAt(expiresAt)
                 .build();
 
-        reservationRepo.save(stockReservation);
+        stockReservationRepo.save(stockReservation);
+    }
+
+    public List<StockReservation> getAllByOrderIdWithStatusRESERVED(String orderId)
+    {
+        return stockReservationRepo.findAllByOrderIdAndStatus(UUID.fromString(orderId), StockReservationStatus.RESERVED);
+    }
+
+    public void updateStatusRelease(List<StockReservation> stockReservations)
+    {
+        stockReservations.forEach(stockReservation -> stockReservation.setStatus(StockReservationStatus.RELEASED));
+        stockReservationRepo.saveAll(stockReservations);
     }
 }
