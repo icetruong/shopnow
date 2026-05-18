@@ -468,6 +468,7 @@ Khi đơn bị hủy → release stock.
 | `INSUFFICIENT_STOCK` | 409 | Không đủ hàng để reserve |
 | `FLASH_SALE_SOLD_OUT` | 409 | Hết hàng flash sale |
 | `FLASH_SALE_USER_LIMIT` | 409 | User đã mua trong flash sale này |
+| `INVENTORY_NOT_FOUND` | 404 | Không tìm thấy inventory theo variantId |
 | `RESERVATION_NOT_FOUND` | 404 | Không tìm thấy reservation theo orderId |
 | `STOCK_NOT_FOUND` | 404 | Không tìm thấy variant trong kho |
 | `INVALID_QTY` | 400 | qty phải > 0 |
