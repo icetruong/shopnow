@@ -5,9 +5,15 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
+import java.time.Instant;
+
 @Getter
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
-public class ResrerveResponseSuccess {
+public class ReserveResponseSuccess {
+    private Boolean success;
+    private String orderId;
+    private Instant reservedAt;
+    private Instant expiresAt;
 }

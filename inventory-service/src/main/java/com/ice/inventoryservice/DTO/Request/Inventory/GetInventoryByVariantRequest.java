@@ -1,4 +1,4 @@
-package com.ice.inventoryservice.DTO.Request;
+package com.ice.inventoryservice.DTO.Request.Inventory;
 
 import jakarta.validation.constraints.NotEmpty;
 import lombok.AllArgsConstructor;

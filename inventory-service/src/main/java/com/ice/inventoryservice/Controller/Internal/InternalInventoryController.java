@@ -1,9 +1,10 @@
 package com.ice.inventoryservice.Controller.Internal;
 
-import com.ice.inventoryservice.DTO.Request.GetInventoryByVariantRequest;
-import com.ice.inventoryservice.DTO.Response.Common.ApiResponse;
+import com.ice.inventoryservice.DTO.Request.Inventory.GetInventoryByVariantRequest;
+import com.ice.inventoryservice.DTO.Request.Inventory.ReserveRequest;
 import com.ice.inventoryservice.DTO.Response.Inventory.GetInventoryByVariantResponse;
 import com.ice.inventoryservice.DTO.Response.Inventory.InventoryResponse;
+import com.ice.inventoryservice.DTO.Response.Inventory.ReserveResponseSuccess;
 import com.ice.inventoryservice.Service.InventoryService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -27,10 +28,19 @@ public class InternalInventoryController {
         );
     }
 
+    @GetMapping("/stock/batch")
     public ResponseEntity<GetInventoryByVariantResponse> getStockByVariants(@Valid @RequestBody GetInventoryByVariantRequest request)
     {
         return ResponseEntity.ok(
                 inventoryService.getByVariants(request)
+        );
+    }
+
+    @PostMapping("/stock/reserve")
+    public ResponseEntity<ReserveResponseSuccess> reserve(@Valid @RequestBody ReserveRequest request)
+    {
+        return ResponseEntity.ok(
+                inventoryService.reserveOrder(request)
         );
     }
 

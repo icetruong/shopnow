@@ -113,7 +113,7 @@ Dùng **Pessimistic Lock** — lock row cho đến khi transaction xong.
 ```json
 {
   "success": false,
-  "code":    "INSUFFICIENT_STOCK",
+  "errorCode":    "INSUFFICIENT_STOCK",
   "message": "Không đủ hàng.",
   "details": [
     {

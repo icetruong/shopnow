@@ -1,6 +1,7 @@
 package com.ice.inventoryservice.Exception;
 
 import com.ice.inventoryservice.DTO.Response.Common.ApiResponse;
+import com.ice.inventoryservice.DTO.Response.Inventory.ReserveResponseFail;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -37,5 +38,18 @@ public class GlobalExceptionHandler {
 
         return ResponseEntity.badRequest()
                 .body(ApiResponse.fail(message, "INVALID_REQUEST"));
+    }
+
+    @ExceptionHandler(InsufficientStockException.class)
+    public ResponseEntity<ReserveResponseFail> handleInsufficientStock(InsufficientStockException ex)
+    {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(new ReserveResponseFail(
+                        false,
+                        ex.getInsufficientCode(),
+                        ex.getMessage(),
+                        ex.getItem()
+                ));
+
     }
 }

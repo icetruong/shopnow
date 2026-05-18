@@ -1,24 +1,34 @@
 package com.ice.inventoryservice.Service;
 
-import com.ice.inventoryservice.DTO.Request.GetInventoryByVariantRequest;
+import com.ice.inventoryservice.DTO.Request.Inventory.GetInventoryByVariantRequest;
+import com.ice.inventoryservice.DTO.Request.Inventory.ItemReserveRequest;
+import com.ice.inventoryservice.DTO.Request.Inventory.ReserveRequest;
 import com.ice.inventoryservice.DTO.Response.Inventory.GetInventoryByVariantResponse;
 import com.ice.inventoryservice.DTO.Response.Inventory.InventoryResponse;
+import com.ice.inventoryservice.DTO.Response.Inventory.ItemReserveResponseFail;
+import com.ice.inventoryservice.DTO.Response.Inventory.ReserveResponseSuccess;
 import com.ice.inventoryservice.Entity.Inventory;
 import com.ice.inventoryservice.Enum.ErrorCode;
 import com.ice.inventoryservice.Enum.StockStatus;
+import com.ice.inventoryservice.Exception.InsufficientStockException;
 import com.ice.inventoryservice.Exception.ResourceNotFoundException;
 import com.ice.inventoryservice.Repository.InventoryRepo;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
-import java.util.List;
-import java.util.UUID;
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
+import java.time.temporal.ChronoUnit;
+import java.util.*;
 
 @Service
 @RequiredArgsConstructor
 public class InventoryService {
 
     private final InventoryRepo inventoryRepo;
+    private final StockReservationService stockReservationService;
 
     public InventoryResponse getInventory(UUID variantId)
     {
@@ -36,6 +46,58 @@ public class InventoryService {
         return new GetInventoryByVariantResponse(inventories.stream().map(
                 this::toInventoryResponse
         ).toList());
+    }
+
+    @Transactional
+    public ReserveResponseSuccess reserveOrder(ReserveRequest request)
+    {
+        Map<UUID, Integer> itemsMap = new HashMap<>();
+        List<UUID> variantIds = new ArrayList<>();
+        for(ItemReserveRequest item: request.getItems())
+        {
+            UUID variantId = UUID.fromString(item.getVariantId());
+            itemsMap.put(variantId, item.getQty());
+            variantIds.add(variantId);
+        }
+
+        List<Inventory> inventories = inventoryRepo.findAllByVariantIdInOrderByVariantId(variantIds);
+
+        if(inventories.size() != variantIds.size())
+            throw new ResourceNotFoundException("has variantIds not found in inventory", ErrorCode.INVENTORY_NOT_FOUND);
+
+        List<ItemReserveResponseFail> itemReserveResponseFails = new ArrayList<>();
+
+        inventories.forEach(inventory -> {
+                if(inventory.getAvailableQty() < itemsMap.get(inventory.getVariantId()))
+                    itemReserveResponseFails.add(new ItemReserveResponseFail(
+                            inventory.getVariantId().toString(),
+                            inventory.getSku(),
+                            itemsMap.get(inventory.getVariantId()),
+                            inventory.getAvailableQty()
+                    ));
+        });
+        if(!itemReserveResponseFails.isEmpty())
+            throw new InsufficientStockException("insufficient stock", "INSUFFICIENT_STOCK", itemReserveResponseFails);
+
+
+        LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);  // thêm ZoneOffset.UTC
+        LocalDateTime expiresAt = now.plusMinutes(15);
+
+        for(Inventory inventory : inventories)
+        {
+            Integer qty = itemsMap.get(inventory.getVariantId());
+            inventory.setReservedQty(inventory.getReservedQty() + qty);
+
+            stockReservationService.insertStockReservation(request.getOrderId(), inventory.getVariantId().toString(), qty, expiresAt);
+        }
+        inventoryRepo.saveAll(inventories);
+
+        return new ReserveResponseSuccess(
+                true,
+                request.getOrderId(),
+                now.toInstant(ZoneOffset.UTC),       // Instant
+                expiresAt.toInstant(ZoneOffset.UTC)
+        );
     }
 
     private InventoryResponse toInventoryResponse(Inventory inventory)
