@@ -1,9 +1,6 @@
 package com.ice.inventoryservice.Service;
 
-import com.ice.inventoryservice.DTO.Request.Inventory.GetInventoryByVariantRequest;
-import com.ice.inventoryservice.DTO.Request.Inventory.ItemReserveRequest;
-import com.ice.inventoryservice.DTO.Request.Inventory.ReleaseRequest;
-import com.ice.inventoryservice.DTO.Request.Inventory.ReserveRequest;
+import com.ice.inventoryservice.DTO.Request.Inventory.*;
 import com.ice.inventoryservice.DTO.Response.Inventory.*;
 import com.ice.inventoryservice.Entity.Inventory;
 import com.ice.inventoryservice.Entity.StockReservation;
@@ -131,6 +128,41 @@ public class InventoryService {
                 request.getOrderId(),
                 Instant.now()
         );
+    }
+
+    @Transactional
+    public DeductResponse deductOrder(DeductRequest request)
+    {
+        List<StockReservation> stockReservations = stockReservationService.getAllByOrderIdWithStatusRESERVED(request.getOrderId());
+        if (stockReservations.isEmpty())
+            throw new ResourceNotFoundException("no reserved stock found for orderId", ErrorCode.INVENTORY_NOT_FOUND);
+
+        Map<UUID, Integer> itemsMap = new HashMap<>();
+        List<UUID> variantIds = new ArrayList<>();
+        for(StockReservation item: stockReservations)
+        {
+            itemsMap.put(item.getVariantId(), item.getQty());
+            variantIds.add(item.getVariantId());
+        }
+
+        List<Inventory> inventories = inventoryRepo.findAllByVariantIdInOrderByVariantId(variantIds);
+
+        for(Inventory inventory : inventories)
+        {
+            Integer qty = itemsMap.get(inventory.getVariantId());
+            inventory.setReservedQty(inventory.getReservedQty() - qty);
+            inventory.setSoldQty(inventory.getSoldQty() + qty);
+            inventory.setStockQty(inventory.getStockQty() - qty);
+        }
+        stockReservationService.updateStatusDeduct(stockReservations);
+        inventoryRepo.saveAll(inventories);
+
+        return new DeductResponse(
+                true,
+                request.getOrderId(),
+                Instant.now()
+        );
+
     }
 
     private InventoryResponse toInventoryResponse(Inventory inventory)

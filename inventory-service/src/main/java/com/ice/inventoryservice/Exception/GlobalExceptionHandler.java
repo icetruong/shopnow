@@ -50,6 +50,12 @@ public class GlobalExceptionHandler {
                         ex.getMessage(),
                         ex.getItem()
                 ));
+    }
 
+    @ExceptionHandler(FlashSaleSoldOutException.class)
+    public ResponseEntity<ApiResponse<Void>> handleFlashSaleSoldOut(FlashSaleSoldOutException ex)
+    {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(ApiResponse.fail(ex.getMessage(), "FLASH_SALE_SOLD_OUT"));
     }
 }

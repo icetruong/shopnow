@@ -1,12 +1,8 @@
 package com.ice.inventoryservice.Controller.Internal;
 
-import com.ice.inventoryservice.DTO.Request.Inventory.GetInventoryByVariantRequest;
-import com.ice.inventoryservice.DTO.Request.Inventory.ReleaseRequest;
-import com.ice.inventoryservice.DTO.Request.Inventory.ReserveRequest;
-import com.ice.inventoryservice.DTO.Response.Inventory.GetInventoryByVariantResponse;
-import com.ice.inventoryservice.DTO.Response.Inventory.InventoryResponse;
-import com.ice.inventoryservice.DTO.Response.Inventory.ReleaseResponse;
-import com.ice.inventoryservice.DTO.Response.Inventory.ReserveResponseSuccess;
+import com.ice.inventoryservice.DTO.Request.Inventory.*;
+import com.ice.inventoryservice.DTO.Response.Inventory.*;
+import com.ice.inventoryservice.Service.FlashSaleService;
 import com.ice.inventoryservice.Service.InventoryService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -21,6 +17,7 @@ import java.util.UUID;
 public class InternalInventoryController {
 
     private final InventoryService inventoryService;
+    private final FlashSaleService flashSaleService;
 
     @GetMapping("/stock/{variantId}")
     public ResponseEntity<InventoryResponse> getStock(@PathVariable UUID variantId)
@@ -53,4 +50,18 @@ public class InternalInventoryController {
                 inventoryService.releaseOrder(request)
         );
     }
+
+    @PostMapping("/stock/deduct")
+    public ResponseEntity<DeductResponse> deduct(@Valid @RequestBody DeductRequest request)
+    {
+        return ResponseEntity.ok(
+                inventoryService.deductOrder(request)
+        );
+    }
+
+    @PostMapping("/stock/flash-sale/reserve")
+    public ResponseEntity<FlashSaleReserveResponse> flashSaleReserve(@Valid @RequestBody FlashSaleReserveRequest request) {
+        return ResponseEntity.ok(flashSaleService.reserve(request));
+    }
+
 }

@@ -37,4 +37,9 @@ public class StockReservationService {
         stockReservations.forEach(stockReservation -> stockReservation.setStatus(StockReservationStatus.RELEASED));
         stockReservationRepo.saveAll(stockReservations);
     }
+
+    public void updateStatusDeduct(List<StockReservation> stockReservations) {
+        stockReservations.forEach(stockReservation -> stockReservation.setStatus(StockReservationStatus.DEDUCTED));
+        stockReservationRepo.saveAll(stockReservations);
+    }
 }

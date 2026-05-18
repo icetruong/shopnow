@@ -1,7 +1,7 @@
 package com.ice.inventoryservice.Exception;
 
-public class ExceptionFlashSaleSoldOutException extends RuntimeException {
-  public ExceptionFlashSaleSoldOutException(String message) {
-    super(message);
-  }
+public class FlashSaleSoldOutException extends RuntimeException {
+    public FlashSaleSoldOutException(String message) {
+        super(message);
+    }
 }

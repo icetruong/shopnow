@@ -221,12 +221,13 @@ Reserve hàng flash sale — dùng **Redis DECR atomic** thay vì DB lock để 
 
 **Request Body**
 ```json
-{
-  "flashSaleId": "fs-uuid-1",
-  "variantId":   "var-uuid-1",
-  "orderId":     "order-uuid-1",
-  "qty":         1
-}
+ {
+    "flashSaleId": "fs-uuid-1",
+    "variantId":   "var-uuid-1",
+    "orderId":     "order-uuid-1",
+    "userId":      "user-uuid-1",
+    "qty":         1
+  }
 ```
 
 **Response 200** — còn hàng
@@ -242,7 +243,7 @@ Reserve hàng flash sale — dùng **Redis DECR atomic** thay vì DB lock để 
 ```json
 {
   "success": false,
-  "code":    "FLASH_SALE_SOLD_OUT",
+  "errorCode,":    "FLASH_SALE_SOLD_OUT",
   "message": "Sản phẩm flash sale đã hết."
 }
 ```

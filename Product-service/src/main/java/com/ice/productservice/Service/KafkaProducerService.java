@@ -17,7 +17,7 @@ import java.util.UUID;
 @Service
 @RequiredArgsConstructor
 public class KafkaProducerService {
-    private final KafkaTemplate<String, ProductEvent> kafkaTemplate;
+    private final KafkaTemplate<String, Object> kafkaTemplate;
     private static final String TOPIC = "product.updated";
 
 
@@ -54,7 +54,7 @@ public class KafkaProducerService {
                 product.getSoldCount(),
                 thumbnail,
                 product.getIsActive(),
-                product.getIsDelete(),
+                product.getIsDeleted(),
                 colors,
                 sizes,
                 product.getUpdatedAt()
