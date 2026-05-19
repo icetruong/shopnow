@@ -11,6 +11,7 @@ import com.ice.inventoryservice.Enum.ErrorCode;
 import com.ice.inventoryservice.Enum.StockStatus;
 import com.ice.inventoryservice.Enum.StockTransactionType;
 import com.ice.inventoryservice.Exception.InsufficientStockException;
+import com.ice.inventoryservice.Exception.InventoryExistException;
 import com.ice.inventoryservice.Exception.ResourceNotFoundException;
 import com.ice.inventoryservice.Repository.InventoryRepo;
 import com.ice.inventoryservice.Util.InventorySpecification;
@@ -35,6 +36,21 @@ public class InventoryService {
     private final StockReservationService stockReservationService;
     private final KafkaProducerService kafkaProducerService;
     private final StockTransactionService stockTransactionService;
+
+    public void addInventory(InsertInventoryRequest request)
+    {
+        if(inventoryRepo.existsByVariantId(UUID.fromString(request.getVariantId())))
+            throw new InventoryExistException("Inventory cho variantId này đã tồn tại.");
+
+        Inventory inventory = Inventory.builder()
+                .variantId(UUID.fromString(request.getVariantId()))
+                .sku(request.getSku())
+                .stockQty(request.getStockQty())
+                .lowStockThreshold(10)
+                .build();
+
+        inventoryRepo.save(inventory);
+    }
 
     public InventoryResponse getInventory(UUID variantId)
     {

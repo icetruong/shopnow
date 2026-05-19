@@ -14,7 +14,7 @@ public interface InventoryRepo extends JpaRepository<Inventory, UUID>, JpaSpecif
     Optional<Inventory> findByVariantId(UUID variantId);
     List<Inventory> findAllByVariantIdIn(List<UUID> variantIds);
 
-    boolean existsByVariantIdIn(List<UUID> variantIds);
+    boolean existsByVariantId(UUID variantId);
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     List<Inventory> findAllByVariantIdInOrderByVariantId(List<UUID> variantIds);
 }

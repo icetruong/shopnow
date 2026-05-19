@@ -186,7 +186,7 @@ public class ProductService {
         Product product = productRepo.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("not found product"));
 
-        product.setIsDelete(true);
+        product.setIsDeleted(true);
         Product save = productRepo.save(product);
         productSyncService.deleteProduct(product.getId().toString());
         kafkaProducerService.publish(save);

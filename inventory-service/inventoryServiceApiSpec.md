@@ -41,7 +41,7 @@ Lấy tồn kho hiện tại của 1 variant. Cart Service gọi để kiểm tr
 
 ---
 
-### GET /internal/stock/batch
+### POST /internal/stock/batch
 Lấy tồn kho của nhiều variant cùng lúc. Cart Service gọi khi render giỏ hàng.
 
 **Header:** `X-Internal-Token: {sharedSecret}`
@@ -91,21 +91,12 @@ Product Service gọi khi tạo variant mới để khởi tạo inventory recor
 ```json
 {
   "variantId": "var-uuid-1",
-  "sku":       "POLO-WHITE-S"
+  "sku":       "POLO-WHITE-S",
+  "stockQty": 10
 }
 ```
 
 **Response 200**
-```json
-{
-  "variantId":    "var-uuid-1",
-  "sku":          "POLO-WHITE-S",
-  "stockQty":     0,
-  "reservedQty":  0,
-  "availableQty": 0,
-  "status":       "OUT_OF_STOCK"
-}
-```
 
 **Response 409** — variant đã tồn tại
 ```json
@@ -120,7 +111,7 @@ Product Service gọi khi tạo variant mới để khởi tạo inventory recor
 ```
 1. Kiểm tra variantId chưa tồn tại trong inventories
 2. Nếu đã tồn tại → trả 409
-3. INSERT inventory (stockQty=0, reservedQty=0, soldQty=0)
+3. INSERT inventory
 4. Return inventory response
 ```
 

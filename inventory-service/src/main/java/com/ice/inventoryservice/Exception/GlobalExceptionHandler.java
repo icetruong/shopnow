@@ -73,4 +73,11 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.CONFLICT)
                 .body(ApiResponse.fail(ex.getMessage(), "NOT_ENOUGH"));
     }
+
+    @ExceptionHandler(InventoryExistException.class)
+    public ResponseEntity<ApiResponse<Void>> handleInventoryExist(InventoryExistException ex)
+    {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(ApiResponse.fail(ex.getMessage(), "INVENTORY_ALREADY_EXISTS"));
+    }
 }

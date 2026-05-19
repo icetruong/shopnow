@@ -27,7 +27,7 @@ public class InternalInventoryController {
         );
     }
 
-    @GetMapping("/stock/batch")
+    @PostMapping("/stock/batch")
     public ResponseEntity<GetInventoryByVariantResponse> getStockByVariants(@Valid @RequestBody GetInventoryByVariantRequest request)
     {
         return ResponseEntity.ok(
@@ -62,6 +62,14 @@ public class InternalInventoryController {
     @PostMapping("/stock/flash-sale/reserve")
     public ResponseEntity<FlashSaleReserveResponse> flashSaleReserve(@Valid @RequestBody FlashSaleReserveRequest request) {
         return ResponseEntity.ok(flashSaleService.reserve(request));
+    }
+
+
+    @PostMapping("/stock")
+    public ResponseEntity<Void> createInventory(@Valid @RequestBody InsertInventoryRequest request)
+    {
+        inventoryService.addInventory(request);
+        return ResponseEntity.ok().build();
     }
 
 }
