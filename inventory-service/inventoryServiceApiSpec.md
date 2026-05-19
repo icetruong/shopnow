@@ -82,6 +82,50 @@ Lấy tồn kho của nhiều variant cùng lúc. Cart Service gọi khi render 
 
 ---
 
+### POST /internal/stock
+Product Service gọi khi tạo variant mới để khởi tạo inventory record tương ứng.
+
+**Header:** `X-Internal-Token: {sharedSecret}`
+
+**Request Body**
+```json
+{
+  "variantId": "var-uuid-1",
+  "sku":       "POLO-WHITE-S"
+}
+```
+
+**Response 200**
+```json
+{
+  "variantId":    "var-uuid-1",
+  "sku":          "POLO-WHITE-S",
+  "stockQty":     0,
+  "reservedQty":  0,
+  "availableQty": 0,
+  "status":       "OUT_OF_STOCK"
+}
+```
+
+**Response 409** — variant đã tồn tại
+```json
+{
+  "success":   false,
+  "errorCode": "INVENTORY_ALREADY_EXISTS",
+  "message":   "Inventory cho variantId này đã tồn tại."
+}
+```
+
+**Logic:**
+```
+1. Kiểm tra variantId chưa tồn tại trong inventories
+2. Nếu đã tồn tại → trả 409
+3. INSERT inventory (stockQty=0, reservedQty=0, soldQty=0)
+4. Return inventory response
+```
+
+---
+
 ### POST /internal/stock/reserve
 Order Service gọi trong Saga flow để giữ hàng khi tạo đơn.
 Dùng **Pessimistic Lock** — lock row cho đến khi transaction xong.
@@ -492,6 +536,7 @@ Khi đơn bị hủy → release stock.
 |--------|----------|------|------|
 | GET | /internal/stock/{variantId} | 🔒 Internal | — |
 | GET | /internal/stock/batch | 🔒 Internal | — |
+| POST | /internal/stock | 🔒 Internal | — |
 | POST | /internal/stock/reserve | 🔒 Internal | — |
 | POST | /internal/stock/release | 🔒 Internal | — |
 | POST | /internal/stock/deduct | 🔒 Internal | — |

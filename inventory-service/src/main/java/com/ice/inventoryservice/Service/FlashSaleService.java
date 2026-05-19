@@ -18,6 +18,7 @@ import com.ice.inventoryservice.Repository.InventoryRepo;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -81,6 +82,7 @@ public class FlashSaleService {
         );
     }
 
+    @Transactional
     public void createdFlashSale(FlashSaleRequest request)
     {
         Map<UUID, Integer> itemsMap = new HashMap<>();
