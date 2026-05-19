@@ -3,10 +3,7 @@ package com.ice.inventoryservice.Controller;
 import com.ice.inventoryservice.DTO.Request.Admin.AdjustQuantityOrderRequest;
 import com.ice.inventoryservice.DTO.Request.Admin.FlashSaleRequest;
 import com.ice.inventoryservice.DTO.Request.Admin.ImportQuantityOrderRequest;
-import com.ice.inventoryservice.DTO.Response.Admin.AdjustQuantityOrderResponse;
-import com.ice.inventoryservice.DTO.Response.Admin.HistoryTransactionResponse;
-import com.ice.inventoryservice.DTO.Response.Admin.ImportQuantityOrderResponse;
-import com.ice.inventoryservice.DTO.Response.Admin.PageStockResponse;
+import com.ice.inventoryservice.DTO.Response.Admin.*;
 import com.ice.inventoryservice.DTO.Response.Common.ApiResponse;
 import com.ice.inventoryservice.Enum.StockStatus;
 import com.ice.inventoryservice.Enum.StockTransactionType;
@@ -30,7 +27,7 @@ public class InventoryController {
     private final FlashSaleService flashSaleService;
 
     @GetMapping("/stock")
-    public ResponseEntity<ApiResponse<PageStockResponse>> getStock(
+    public ResponseEntity<ApiResponse<PageStockResponse<StockResponse>>> getStock(
             @RequestParam(defaultValue = "0") Integer page,
             @RequestParam(defaultValue = "20") Integer size,
             @RequestParam(required = false) UUID variantId,

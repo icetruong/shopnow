@@ -205,7 +205,7 @@ public class InventoryService {
         stockReservationService.updateStatusDeduct(stockReservations);
         inventoryRepo.saveAll(inventories);
         for(Inventory inventory : inventories) {
-            if(inventory.getStockQty() < inventory.getLowStockThreshold())
+            if(inventory.getStockQty() <= inventory.getLowStockThreshold())
                 kafkaProducerService.publishLowWarningEvent(inventory);
         }
         return new DeductResponse(

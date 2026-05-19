@@ -11,7 +11,7 @@ import lombok.Setter;
 @NoArgsConstructor
 @AllArgsConstructor
 public class InventoryResponse {
-    private String variantID;
+    private String variantId;
     private String sku;
     private Integer stockQty;
     private Integer reservedQty;
