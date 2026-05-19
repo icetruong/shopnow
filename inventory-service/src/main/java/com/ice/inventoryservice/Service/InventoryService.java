@@ -1,13 +1,15 @@
 package com.ice.inventoryservice.Service;
 
+import com.ice.inventoryservice.DTO.Request.Admin.AdjustQuantityOrderRequest;
+import com.ice.inventoryservice.DTO.Request.Admin.ImportQuantityOrderRequest;
 import com.ice.inventoryservice.DTO.Request.Inventory.*;
-import com.ice.inventoryservice.DTO.Response.Admin.PageStockResponse;
-import com.ice.inventoryservice.DTO.Response.Admin.StockResponse;
+import com.ice.inventoryservice.DTO.Response.Admin.*;
 import com.ice.inventoryservice.DTO.Response.Inventory.*;
 import com.ice.inventoryservice.Entity.Inventory;
 import com.ice.inventoryservice.Entity.StockReservation;
 import com.ice.inventoryservice.Enum.ErrorCode;
 import com.ice.inventoryservice.Enum.StockStatus;
+import com.ice.inventoryservice.Enum.StockTransactionType;
 import com.ice.inventoryservice.Exception.InsufficientStockException;
 import com.ice.inventoryservice.Exception.ResourceNotFoundException;
 import com.ice.inventoryservice.Repository.InventoryRepo;
@@ -32,6 +34,7 @@ public class InventoryService {
     private final InventoryRepo inventoryRepo;
     private final StockReservationService stockReservationService;
     private final KafkaProducerService kafkaProducerService;
+    private final StockTransactionService stockTransactionService;
 
     public InventoryResponse getInventory(UUID variantId)
     {
@@ -173,6 +176,15 @@ public class InventoryService {
             inventory.setReservedQty(inventory.getReservedQty() - qty);
             inventory.setSoldQty(inventory.getSoldQty() + qty);
             inventory.setStockQty(inventory.getStockQty() - qty);
+
+            String note = "Trừ hàng đơn" + request.getOrderId();
+            stockTransactionService.addStockTransaction(
+                    StockTransactionType.DEDUCT,
+                    note,
+                    qty,
+                    inventory.getStockQty() + qty,
+                    inventory
+            );
         }
         stockReservationService.updateStatusDeduct(stockReservations);
         inventoryRepo.saveAll(inventories);
@@ -201,7 +213,7 @@ public class InventoryService {
     }
 
 
-    public PageStockResponse getStockForAdmin(Integer page, Integer size, UUID variantId, UUID productId, StockStatus status)
+    public PageStockResponse<StockResponse> getStockForAdmin(Integer page, Integer size, UUID variantId, UUID productId, StockStatus status)
     {
         Specification<Inventory> specification = Specification.where(InventorySpecification.hasVariantId(variantId))
                 .and(InventorySpecification.hasStatus(status));
@@ -224,12 +236,65 @@ public class InventoryService {
                 )
         ).toList();
 
-        return new PageStockResponse(
+        return new PageStockResponse<StockResponse>(
                 stockResponses,
                 inventoryPage.getNumber(),
                 inventoryPage.getSize(),
                 inventoryPage.getTotalElements(),
                 inventoryPage.getTotalPages()
+        );
+    }
+
+    @Transactional
+    public ImportQuantityOrderResponse importQuantity(UUID variantId,ImportQuantityOrderRequest request)
+    {
+        Inventory inventory = inventoryRepo.findByVariantId(variantId)
+                .orElseThrow(() -> new ResourceNotFoundException("inventory not found", ErrorCode.INVENTORY_NOT_FOUND));
+
+        Integer beforeQty = inventory.getStockQty();
+        inventory.setStockQty(request.getQty() + inventory.getStockQty());
+        stockTransactionService.addStockTransaction(
+                StockTransactionType.IMPORT,
+                request.getNote(),
+                request.getQty(),
+                beforeQty,
+                inventory
+                );
+
+        inventoryRepo.save(inventory);
+        return new ImportQuantityOrderResponse(
+                inventory.getVariantId().toString(),
+                beforeQty,
+                request.getQty(),
+                inventory.getStockQty(),
+                inventory.getUpdatedAt().toInstant(ZoneOffset.UTC)
+        );
+    }
+
+    @Transactional
+    public AdjustQuantityOrderResponse adjustQuantity(UUID variantId, AdjustQuantityOrderRequest request)
+    {
+        Inventory inventory = inventoryRepo.findByVariantId(variantId)
+                .orElseThrow(() -> new ResourceNotFoundException("inventory not found", ErrorCode.INVENTORY_NOT_FOUND));
+
+        Integer beforeQty = inventory.getStockQty();
+        inventory.setStockQty(request.getNewQty());
+        stockTransactionService.addStockTransaction(
+                StockTransactionType.ADJUSTMENT,
+                request.getNote(),
+                request.getNewQty() - beforeQty,
+                beforeQty,
+                inventory
+        );
+
+        inventoryRepo.save(inventory);
+
+        return new AdjustQuantityOrderResponse(
+                inventory.getVariantId().toString(),
+                beforeQty,
+                inventory.getStockQty(),
+                inventory.getStockQty() - beforeQty,
+                inventory.getUpdatedAt().toInstant(ZoneOffset.UTC)
         );
     }
 }

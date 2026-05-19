@@ -40,6 +40,7 @@ import org.springframework.stereotype.Service;
 
 import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.UUID;
 
@@ -246,7 +247,7 @@ public class UserService {
                 user.getProvider(),
                 user.getEmailVerified(),
                 user.getIsActive(),
-                user.getCreatedAt()
+                user.getCreatedAt().toInstant(ZoneOffset.UTC)
         );
     }
 

@@ -410,7 +410,9 @@ type      = IMPORT    (IMPORT | DEDUCT | RELEASE | ADJUSTMENT | FLASH_SALE)
       }
     ],
     "page":          0,
-    "totalElements": 25
+    "size":          20,
+    "totalElements": 25,
+    "totalPages":    2
   }
 }
 ```

@@ -11,8 +11,8 @@ import java.util.List;
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
-public class PageStockResponse {
-    List<StockResponse> content;
+public class PageStockResponse<T> {
+    List<T> content;
     private Integer page;
     private Integer size;
     private Long totalElements;

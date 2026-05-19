@@ -66,4 +66,11 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.CONFLICT)
                 .body(ApiResponse.fail(ex.getMessage(), "FLASH_SALE_USER_LIMIT"));
     }
+
+    @ExceptionHandler(NotEnoughToUserForFlashSale.class)
+    public ResponseEntity<ApiResponse<Void>> handleNotEnoughToUserForFlashSale(NotEnoughToUserForFlashSale ex)
+    {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(ApiResponse.fail(ex.getMessage(), "NOT_ENOUGH"));
+    }
 }

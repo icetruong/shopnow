@@ -1,22 +1,35 @@
 package com.ice.inventoryservice.Service;
 
 import com.ice.inventoryservice.DTO.Event.FlashSaleReservedEvent;
+import com.ice.inventoryservice.DTO.Request.Admin.FlashSaleRequest;
+import com.ice.inventoryservice.DTO.Request.Admin.ItemFlashSaleRequest;
 import com.ice.inventoryservice.DTO.Request.Inventory.FlashSaleReserveRequest;
+import com.ice.inventoryservice.DTO.Request.Inventory.ItemReserveRequest;
 import com.ice.inventoryservice.DTO.Response.Inventory.FlashSaleReserveResponse;
+import com.ice.inventoryservice.Entity.FlashSaleStock;
+import com.ice.inventoryservice.Entity.Inventory;
 import com.ice.inventoryservice.Enum.ErrorCode;
 import com.ice.inventoryservice.Exception.FlashSaleSoldOutException;
 import com.ice.inventoryservice.Exception.FlashSaleUserLimitException;
+import com.ice.inventoryservice.Exception.NotEnoughToUserForFlashSale;
 import com.ice.inventoryservice.Exception.ResourceNotFoundException;
+import com.ice.inventoryservice.Repository.FlashSaleStockRepo;
+import com.ice.inventoryservice.Repository.InventoryRepo;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
+import java.util.*;
 
 @Service
 @RequiredArgsConstructor
 public class FlashSaleService {
+    private final FlashSaleStockRepo flashSaleStockRepo;
+    private final InventoryRepo inventoryRepo;
     private final StringRedisTemplate redisTemplate;
     private final KafkaProducerService kafkaProducerService;
 
@@ -66,9 +79,59 @@ public class FlashSaleService {
                 remaining,
                 now
         );
+    }
+
+    public void createdFlashSale(FlashSaleRequest request)
+    {
+        Map<UUID, Integer> itemsMap = new HashMap<>();
+        List<UUID> variantIds = new ArrayList<>();
+        for(ItemFlashSaleRequest item: request.getItems())
+        {
+            UUID variantId = UUID.fromString(item.getVariantId());
+            itemsMap.put(variantId, item.getFlashSaleQty());
+            variantIds.add(variantId);
+        }
+
+        List<Inventory> inventories = inventoryRepo.findAllByVariantIdIn(variantIds);
+
+        if(inventories.size() != variantIds.size())
+            throw new ResourceNotFoundException("has variantIds not found in inventory", ErrorCode.INVENTORY_NOT_FOUND);
+
+        for(Inventory inventory : inventories)
+        {
+            Integer qty = itemsMap.get(inventory.getVariantId());
+            if(inventory.getStockQty() < qty)
+                throw new NotEnoughToUserForFlashSale("not stock quantity to create Flash Sale");
+        }
+
+        List<FlashSaleStock> flashSaleStocks = new ArrayList<>();
+
+        String activeKey = KEY_ACTIVE.formatted(request.getFlashSaleId());
+        Duration ttl = Duration.between(Instant.now(), request.getEndsAt());
+        redisTemplate.opsForValue().set(
+                activeKey, "1", ttl
+        );
+
+        for(Inventory inventory : inventories)
+        {
+            Integer qty = itemsMap.get(inventory.getVariantId());
+
+            String stockKey = KEY_STOCK.formatted(request.getFlashSaleId(), inventory.getVariantId().toString());
+
+            redisTemplate.opsForValue().set(
+                    stockKey, String.valueOf(qty), ttl
+            );
+            flashSaleStocks.add(FlashSaleStock.builder()
+                    .flashSaleId(UUID.fromString(request.getFlashSaleId()))
+                    .variantId(inventory.getVariantId())
+                    .initialQty(qty)
+                    .startsAt(LocalDateTime.ofInstant(request.getStartsAt(), ZoneOffset.UTC))
+                    .endsAt(LocalDateTime.ofInstant(request.getEndsAt(), ZoneOffset.UTC))
+                    .build()
+            );
 
 
-
-
+        }
+        flashSaleStockRepo.saveAll(flashSaleStocks);
     }
 }

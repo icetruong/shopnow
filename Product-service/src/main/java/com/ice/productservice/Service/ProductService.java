@@ -28,6 +28,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.DigestUtils;
 
 import java.time.Duration;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -244,8 +245,8 @@ public class ProductService {
                 product.getProductImages().stream().map(this::toImageProductDetailResponse).toList(),
                 product.getProductAttributes().stream().map(this::toAttributeProductDetailResponse).toList(),
                 product.getProductVariants().stream().map(this::toVariantProductDetailResponse).toList(),
-                product.getCreatedAt(),
-                product.getUpdatedAt()
+                product.getCreatedAt().toInstant(ZoneOffset.UTC),
+                product.getUpdatedAt().toInstant(ZoneOffset.UTC)
         );
     }
 
