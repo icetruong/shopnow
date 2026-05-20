@@ -1,11 +1,14 @@
 package com.ice.productservice.Service;
 
+import com.ice.productservice.Client.InventoryClient;
 import com.ice.productservice.DTO.Request.Internal.ProductRatingInternalRequest;
 import com.ice.productservice.DTO.Request.Product.ProductRequest;
 import com.ice.productservice.DTO.Request.Product.ProductSetIsActiveRequest;
 import com.ice.productservice.DTO.Request.Product.ProductUpdateRequest;
 import com.ice.productservice.DTO.Response.Internal.ProductInternalResponse;
 import com.ice.productservice.DTO.Response.Internal.ProductRatingInternalResponse;
+import com.ice.productservice.DTO.Response.Internal.StockBatchResponse;
+import com.ice.productservice.DTO.Response.Internal.StockItemResponse;
 import com.ice.productservice.DTO.Response.Product.*;
 import com.ice.productservice.Entity.*;
 import com.ice.productservice.Exception.AlreadyExistsException;
@@ -29,9 +32,7 @@ import org.springframework.util.DigestUtils;
 
 import java.time.Duration;
 import java.time.ZoneOffset;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.UUID;
+import java.util.*;
 
 @Service
 @RequiredArgsConstructor
@@ -44,6 +45,7 @@ public class ProductService {
     private final ProductSyncService productSyncService;
     private final RedisTemplate<String, Object> redisTemplate;
     private final KafkaProducerService kafkaProducerService;
+    private final InventoryClient inventoryClient;
 
 
     public PageProductResponse getAllProduct(Integer page, Integer size, String sort, String direction, String categoryId, Long minPrice, Long maxPrice, Boolean isActive) {
@@ -228,6 +230,19 @@ public class ProductService {
     {
         Integer discountPct = product.getSalePrice() == null ? 0 : (int) ((product.getBasePrice() - product.getSalePrice()) * 100 / product.getBasePrice());
 
+        List<String> variantIds = product.getProductVariants().stream()
+                .map(
+                        productVariant -> productVariant.getId().toString()
+                ).toList();
+
+        StockBatchResponse stockBatchResponse = inventoryClient.getBatchStock(variantIds);
+
+        Map<String, Integer> stockMap = new HashMap<>();
+        for(StockItemResponse stockItemResponse : stockBatchResponse.getData())
+        {
+            stockMap.put(stockItemResponse.getVariantId(), stockItemResponse.getAvailableQty());
+        }
+
         return new ProductDetailResponse(
                 product.getId().toString(),
                 product.getName(),
@@ -244,7 +259,7 @@ public class ProductService {
                 product.getIsActive(),
                 product.getProductImages().stream().map(this::toImageProductDetailResponse).toList(),
                 product.getProductAttributes().stream().map(this::toAttributeProductDetailResponse).toList(),
-                product.getProductVariants().stream().map(this::toVariantProductDetailResponse).toList(),
+                product.getProductVariants().stream().map(productVariant -> toVariantProductDetailResponse(productVariant, stockMap.getOrDefault(productVariant.getId().toString(),0))).toList(),
                 product.getCreatedAt().toInstant(ZoneOffset.UTC),
                 product.getUpdatedAt().toInstant(ZoneOffset.UTC)
         );
@@ -269,7 +284,7 @@ public class ProductService {
         );
     }
 
-    private VariantProductDetailResponse toVariantProductDetailResponse(ProductVariant productVariant)
+    private VariantProductDetailResponse toVariantProductDetailResponse(ProductVariant productVariant, Integer availableQty)
     {
         return new VariantProductDetailResponse(
                 productVariant.getId().toString(),
@@ -277,7 +292,7 @@ public class ProductService {
                 productVariant.getColor(),
                 productVariant.getSize(),
                 productVariant.getPrice(),
-                0,// chưa lấy được từ Inventory Service
+                availableQty,
                 productVariant.getImageUrl()
         );
     }

@@ -9,6 +9,7 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
+import java.util.List;
 import java.util.stream.Collectors;
 
 @RestControllerAdvice
@@ -75,9 +76,13 @@ public class GlobalExceptionHandler {
     }
 
     @ExceptionHandler(InventoryExistException.class)
-    public ResponseEntity<ApiResponse<Void>> handleInventoryExist(InventoryExistException ex)
+    public ResponseEntity<ApiResponse<List<String>>> handleInventoryExist(InventoryExistException ex)
     {
-        return ResponseEntity.status(HttpStatus.CONFLICT)
-                .body(ApiResponse.fail(ex.getMessage(), "INVENTORY_ALREADY_EXISTS"));
+        if(ex.variantIds.isEmpty())
+            return ResponseEntity.status(HttpStatus.CONFLICT)
+                    .body(ApiResponse.fail(ex.getMessage(), "INVENTORY_ALREADY_EXISTS"));
+        else
+            return ResponseEntity.status(HttpStatus.CONFLICT)
+                    .body(new ApiResponse<>(false,ex.getMessage(),ex.variantIds,"INVENTORY_ALREADY_EXISTS"));
     }
 }

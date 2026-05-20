@@ -6,6 +6,7 @@ import com.ice.inventoryservice.Service.FlashSaleService;
 import com.ice.inventoryservice.Service.InventoryService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -66,10 +67,17 @@ public class InternalInventoryController {
 
 
     @PostMapping("/stock")
-    public ResponseEntity<Void> createInventory(@Valid @RequestBody InsertInventoryRequest request)
+    public ResponseEntity<InventoryResponse> createInventory(@Valid @RequestBody InsertInventoryRequest request)
     {
-        inventoryService.addInventory(request);
-        return ResponseEntity.ok().build();
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(inventoryService.addInventory(request));
+    }
+
+    @PostMapping("/stock/bulk")
+    public ResponseEntity<ListInventoryResponse> createAllInventory(@Valid @RequestBody ListItemStockRequest request)
+    {
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(inventoryService.addAllInventory(request));
     }
 
 }

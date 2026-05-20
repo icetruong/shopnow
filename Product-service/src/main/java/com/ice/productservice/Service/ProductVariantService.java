@@ -1,5 +1,8 @@
 package com.ice.productservice.Service;
 
+import com.ice.productservice.Client.InventoryClient;
+import com.ice.productservice.DTO.Request.Internal.StockItemPostRequest;
+import com.ice.productservice.DTO.Request.Internal.StockPostRequest;
 import com.ice.productservice.DTO.Request.Product.CreateVariantProductRequest;
 import com.ice.productservice.DTO.Request.Product.UpdateVariantProductRequest;
 import com.ice.productservice.DTO.Request.Product.VariantProductRequest;
@@ -25,25 +28,33 @@ import java.util.UUID;
 public class ProductVariantService {
     private final ProductVariantRepo productVariantRepo;
     private final ProductRepo productRepo;
+    private final InventoryClient inventoryClient;
 
+    @Transactional
     public void createProductVariant(List<VariantProductRequest> requests, Product product)
     {
         List<ProductVariant> productVariants = new ArrayList<>();
+        List<StockItemPostRequest> items = new ArrayList<>();
         for(VariantProductRequest request : requests)
         {
             if (productVariantRepo.existsBySku(request.getSku()))
                 throw new AlreadyExistsException("SKU đã tồn tại.");
 
-            // request.getStockQty() không được gọi ở đây → vì sẽ cho qua inventory service
-            productVariants.add(ProductVariant.builder()
+            ProductVariant variant = ProductVariant.builder()
                     .product(product)
                     .sku(request.getSku())
                     .color(request.getColor())
                     .size(request.getSize())
                     .price(request.getPrice())
-                    .build());
+                    .build();
+            productVariants.add(variant);
+            items.add(new StockItemPostRequest(
+                    variant.getId().toString(),
+                    variant.getSku(),
+                    request.getStockQty()));
         }
         productVariantRepo.saveAll(productVariants);
+        inventoryClient.insertAllStock(new StockPostRequest(items));
     }
 
 
@@ -55,7 +66,7 @@ public class ProductVariantService {
         if (productVariantRepo.existsBySku(request.getSku()))
             throw new AlreadyExistsException("SKU đã tồn tại.");
 
-        // request.getStockQty() không được gọi ở đây → vì sẽ cho qua inventory service
+
         ProductVariant productVariant = ProductVariant.builder()
                 .product(product)
                 .sku(request.getSku())
@@ -67,6 +78,7 @@ public class ProductVariantService {
 
         ProductVariant save = productVariantRepo.save(productVariant);
 
+        inventoryClient.insertStock(new StockItemPostRequest(save.getId().toString(), save.getSku(), request.getStockQty()));
         return new VariantProductResponse(save.getId().toString());
     }
 

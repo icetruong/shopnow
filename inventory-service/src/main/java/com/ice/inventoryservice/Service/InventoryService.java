@@ -37,7 +37,7 @@ public class InventoryService {
     private final KafkaProducerService kafkaProducerService;
     private final StockTransactionService stockTransactionService;
 
-    public void addInventory(InsertInventoryRequest request)
+    public InventoryResponse addInventory(InsertInventoryRequest request)
     {
         if(inventoryRepo.existsByVariantId(UUID.fromString(request.getVariantId())))
             throw new InventoryExistException("Inventory cho variantId này đã tồn tại.");
@@ -46,10 +46,45 @@ public class InventoryService {
                 .variantId(UUID.fromString(request.getVariantId()))
                 .sku(request.getSku())
                 .stockQty(request.getStockQty())
-                .lowStockThreshold(10)
                 .build();
 
         inventoryRepo.save(inventory);
+
+        return toInventoryResponse(inventory);
+    }
+
+    @Transactional
+    public ListInventoryResponse addAllInventory(ListItemStockRequest request)
+    {
+        List<UUID> allIds = request.getItems().stream()
+                .map(i -> UUID.fromString(i.getVariantId()))
+                .toList();
+
+        List<String> conflicts = inventoryRepo.findAllByVariantIdIn(allIds).stream()
+                .map(i -> i.getVariantId().toString())
+                .toList();
+
+        if (!conflicts.isEmpty())
+            throw new InventoryExistException("Một số variantId đã tồn tại trong inventory.", conflicts);
+
+
+        List<Inventory> inventories = new ArrayList<>();
+        request.getItems().forEach(
+                item -> {
+                    inventories.add(Inventory.builder()
+                            .variantId(UUID.fromString(item.getVariantId()))
+                            .sku(item.getSku())
+                            .stockQty(item.getStockQty())
+                            .build()
+                    );
+                }
+        );
+
+        inventoryRepo.saveAll(inventories);
+
+        return new ListInventoryResponse(inventories.stream().map(
+                this::toInventoryResponse
+        ).toList());
     }
 
     public InventoryResponse getInventory(UUID variantId)

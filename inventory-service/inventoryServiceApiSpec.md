@@ -63,16 +63,25 @@ Lấy tồn kho của nhiều variant cùng lúc. Cart Service gọi khi render 
   "data": [
     {
       "variantId":    "var-uuid-1",
+      "sku":          "POLO-WHITE-S",
+      "stockQty":     50,
+      "reservedQty":  5,
       "availableQty": 45,
       "status":       "IN_STOCK"
     },
     {
       "variantId":    "var-uuid-2",
+      "sku":          "POLO-WHITE-M",
+      "stockQty":     10,
+      "reservedQty":  7,
       "availableQty": 3,
       "status":       "LOW_STOCK"
     },
     {
       "variantId":    "var-uuid-3",
+      "sku":          "POLO-WHITE-L",
+      "stockQty":     5,
+      "reservedQty":  5,
       "availableQty": 0,
       "status":       "OUT_OF_STOCK"
     }
@@ -92,11 +101,21 @@ Product Service gọi khi tạo variant mới để khởi tạo inventory recor
 {
   "variantId": "var-uuid-1",
   "sku":       "POLO-WHITE-S",
-  "stockQty": 10
+  "stockQty":  10
 }
 ```
 
-**Response 200**
+**Response 201** — tạo thành công
+```json
+{
+  "variantId":    "var-uuid-1",
+  "sku":          "POLO-WHITE-S",
+  "stockQty":     10,
+  "reservedQty":  0,
+  "availableQty": 10,
+  "status":       "IN_STOCK"
+}
+```
 
 **Response 409** — variant đã tồn tại
 ```json
@@ -111,8 +130,76 @@ Product Service gọi khi tạo variant mới để khởi tạo inventory recor
 ```
 1. Kiểm tra variantId chưa tồn tại trong inventories
 2. Nếu đã tồn tại → trả 409
-3. INSERT inventory
-4. Return inventory response
+3. INSERT inventory (reservedQty = 0, soldQty = 0)
+4. Trả về inventory vừa tạo
+```
+
+---
+
+### POST /internal/stock/bulk
+Product Service gọi khi tạo nhiều variant cùng lúc để khởi tạo inventory record tương ứng.
+
+**Header:** `X-Internal-Token: {sharedSecret}`
+
+**Request Body**
+```json
+{
+  "items": [
+    {
+      "variantId": "var-uuid-1",
+      "sku":       "POLO-WHITE-S",
+      "stockQty":  10
+    },
+    {
+      "variantId": "var-uuid-2",
+      "sku":       "POLO-WHITE-M",
+      "stockQty":  10
+    }
+  ]
+}
+```
+
+**Response 201** — tạo thành công toàn bộ
+```json
+{
+  "items": [
+    {
+      "variantId":    "var-uuid-1",
+      "sku":          "POLO-WHITE-S",
+      "stockQty":     10,
+      "reservedQty":  0,
+      "availableQty": 10,
+      "status":       "IN_STOCK"
+    },
+    {
+      "variantId":    "var-uuid-2",
+      "sku":          "POLO-WHITE-M",
+      "stockQty":     10,
+      "reservedQty":  0,
+      "availableQty": 10,
+      "status":       "IN_STOCK"
+    }
+  ]
+}
+```
+
+**Response 409** — một hoặc nhiều variantId đã tồn tại
+```json
+{
+  "success":   false,
+  "errorCode": "INVENTORY_ALREADY_EXISTS",
+  "message":   "Một số variantId đã tồn tại trong inventory.",
+  "data": ["var-uuid-1", "var-uuid-2"]
+}
+```
+
+**Logic:**
+```
+1. Lấy toàn bộ variantId từ request
+2. Query batch: tìm những variantId đã tồn tại trong inventories
+3. Nếu có bất kỳ duplicate nào → trả 409 kèm danh sách conflicts (all-or-nothing, không insert gì)
+4. INSERT toàn bộ inventory trong 1 transaction (reservedQty = 0, soldQty = 0)
+5. Trả về danh sách inventory vừa tạo
 ```
 
 ---
@@ -526,8 +613,9 @@ Khi đơn bị hủy → release stock.
 | Method | Endpoint | Auth | Role |
 |--------|----------|------|------|
 | GET | /internal/stock/{variantId} | 🔒 Internal | — |
-| GET | /internal/stock/batch | 🔒 Internal | — |
+| POST | /internal/stock/batch | 🔒 Internal | — |
 | POST | /internal/stock | 🔒 Internal | — |
+| POST | /internal/stock/bulk | 🔒 Internal | — |
 | POST | /internal/stock/reserve | 🔒 Internal | — |
 | POST | /internal/stock/release | 🔒 Internal | — |
 | POST | /internal/stock/deduct | 🔒 Internal | — |

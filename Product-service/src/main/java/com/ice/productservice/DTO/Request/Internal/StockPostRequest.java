@@ -1,4 +1,16 @@
 package com.ice.productservice.DTO.Request.Internal;
 
+import lombok.AllArgsConstructor;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
+
+import java.util.List;
+
+@Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
 public class StockPostRequest {
+    List<StockItemPostRequest> items;
 }
