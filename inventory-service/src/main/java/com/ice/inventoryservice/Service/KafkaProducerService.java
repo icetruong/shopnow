@@ -21,6 +21,7 @@ public class KafkaProducerService {
     private static final String RESERVED = "stock.reserved";
     private static final String RELEASE = "stock.released";
     private static final String LOW_WARNING = "stock.low_warning";
+    private static final String STOCK_CHANGED = "stock.changed";
 
     public void publishFlashSaleEvent(FlashSaleReservedEvent event)
     {
@@ -81,5 +82,18 @@ public class KafkaProducerService {
         );
 
         kafkaTemplate.send(LOW_WARNING, payload.getVariantId(), kafkaEvent);
+    }
+
+    public void publishStockChangeEvent(List<String> variantIds)
+    {
+        KafkaEvent<StockChangePayload> kafkaEvent = new KafkaEvent<>(
+                UUID.randomUUID().toString(),
+                STOCK_CHANGED,
+                Instant.now().toString(),
+                "1.0",
+                new StockChangePayload(variantIds)
+        );
+
+        kafkaTemplate.send(STOCK_CHANGED,kafkaEvent);
     }
 }

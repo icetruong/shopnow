@@ -37,31 +37,6 @@ POST /admin/products
 4. Search Service tạo Kafka consumer lắng nghe topic `product.updated` và tự index.
 5. Endpoint `GET /products/search` và `GET /products/search/suggest` chuyển sang Search Service (hoặc API Gateway route đến Search Service).
 
----
-
-## 2. `stockQty` luôn trả về 0 ❌
-
-**Hiện tại:** `ProductService.java:270`
-```java
-0, // chưa lấy được từ Inventory Service
-```
-
-**Đúng theo kiến trúc:**
-- `stock_qty` KHÔNG lưu trong Product Service (đúng rồi, không có cột này trong DB).
-- Khi trả về variant detail, Product Service phải gọi **Inventory Service** để lấy số lượng tồn kho thực tế.
-
-**Cần làm khi có Inventory Service:**
-1. Thêm Feign Client (hoặc WebClient) để gọi Inventory Service.
-2. Trong `ProductService.toVariantProductDetailResponse()`, thay `0` bằng lời gọi:
-   ```java
-   inventoryClient.getStock(productVariant.getId())
-   ```
-3. Xử lý fallback nếu Inventory Service không phản hồi (trả về `null` hoặc `-1` thay vì crash).
-
-**Lưu ý:** API response vẫn giữ field `stockQty`, chỉ là value sẽ thực thay vì `0`.
-
----
-
 ## 3. Elasticsearch chưa dùng `vi_analyzer` (tiếng Việt) ❌
 
 **Hiện tại:** `ProductDocument.java`

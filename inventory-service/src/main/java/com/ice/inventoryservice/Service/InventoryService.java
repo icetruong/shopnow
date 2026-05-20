@@ -159,7 +159,9 @@ public class InventoryService {
         );
 
         kafkaProducerService.publishReservedEvent(response, request.getItems());
-
+        kafkaProducerService.publishStockChangeEvent(variantIds.stream().map(
+                UUID::toString
+        ).toList());
         return response;
     }
 
@@ -200,7 +202,9 @@ public class InventoryService {
         );
 
         kafkaProducerService.publishReleaseEvent(response, itemsKafka, request.getReason().toString());
-
+        kafkaProducerService.publishStockChangeEvent(variantIds.stream().map(
+                UUID::toString
+        ).toList());
         return response;
     }
 
@@ -243,6 +247,9 @@ public class InventoryService {
             if(inventory.getStockQty() <= inventory.getLowStockThreshold())
                 kafkaProducerService.publishLowWarningEvent(inventory);
         }
+        kafkaProducerService.publishStockChangeEvent(variantIds.stream().map(
+                UUID::toString
+        ).toList());
         return new DeductResponse(
                 true,
                 request.getOrderId(),
@@ -313,6 +320,7 @@ public class InventoryService {
                 );
 
         inventoryRepo.save(inventory);
+        kafkaProducerService.publishStockChangeEvent(List.of(variantId.toString()));
         return new ImportQuantityOrderResponse(
                 inventory.getVariantId().toString(),
                 beforeQty,
@@ -339,7 +347,7 @@ public class InventoryService {
         );
 
         inventoryRepo.save(inventory);
-
+        kafkaProducerService.publishStockChangeEvent(List.of(variantId.toString()));
         return new AdjustQuantityOrderResponse(
                 inventory.getVariantId().toString(),
                 beforeQty,
