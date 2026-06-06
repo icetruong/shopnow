@@ -1,4 +1,4 @@
-package com.ice.cartservice.DTO.Request;
+package com.ice.cartservice.DTO.Request.Product;
 
 import lombok.AllArgsConstructor;
 import lombok.Getter;
@@ -11,6 +11,6 @@ import java.util.List;
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
-public class StockBatchRequest {
+public class ProductBatchRequest {
     List<String> variantIds;
 }
