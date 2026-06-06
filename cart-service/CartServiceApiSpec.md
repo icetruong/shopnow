@@ -32,6 +32,7 @@ Lấy giỏ hàng hiện tại của user. Đồng thời kiểm tra tồn kho r
 ```json
 {
   "success": true,
+  "message": "Lấy giỏ hàng thành công.",
   "data": {
     "cartId":    "cart:user-uuid-1",
     "userId":    "user-uuid-1",

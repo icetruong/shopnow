@@ -1,5 +1,6 @@
 package com.ice.cartservice.DTO.Response.Inventory;
 
+import com.ice.cartservice.Enum.StockStatus;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -15,5 +16,5 @@ public class StockItemResponse {
     private Integer stockQty;
     private Integer reservedQty;
     private Integer availableQty;
-    private String status;
+    private StockStatus status;
 }
