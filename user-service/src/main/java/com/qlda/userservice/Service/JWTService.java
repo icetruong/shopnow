@@ -21,7 +21,7 @@ public class JWTService {
     private long accessTokenExpiry;
     private final JwtEncoder jwtEncoder;
 
-    public String generateAccessToken(Authentication authentication)
+    public String generateAccessToken(Authentication authentication, String userId)
     {
         Instant now = Instant.now();
 
@@ -35,6 +35,7 @@ public class JWTService {
                 .issuedAt(now)
                 .expiresAt(now.plusSeconds(accessTokenExpiry))
                 .subject(authentication.getName())
+                .claim("userId", userId)
                 .claim("roles", role)
                 .build();
 

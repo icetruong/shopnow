@@ -112,7 +112,7 @@ public class UserService {
         User user = userRepo.findByEmail(authentication.getName())
                 .orElseThrow(() -> new ResourceNotFoundException("user not found" + authentication.getName()));
 
-        String token = jwtService.generateAccessToken(authentication);
+        String token = jwtService.generateAccessToken(authentication, user.getId().toString());
         String refreshToken = jwtService.generateRandomToken();
 
         RefreshToken refreshTokenEntity = RefreshToken.builder()
@@ -149,7 +149,7 @@ public class UserService {
 
         refreshTokenRepo.delete(refreshTokenEntity);
 
-        String token = jwtService.generateAccessToken(authentication);
+        String token = jwtService.generateAccessToken(authentication, user.getId().toString());
         String refreshToken = jwtService.generateRandomToken();
 
         RefreshToken new_refreshTokenEntity = RefreshToken.builder()

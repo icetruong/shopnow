@@ -48,7 +48,7 @@ public class OAuth2SuccessHandler extends SimpleUrlAuthenticationSuccessHandler 
                 List.of(new SimpleGrantedAuthority(user.getRole().name()))
         );
 
-        String accessToken = jwtService.generateAccessToken(auth);
+        String accessToken = jwtService.generateAccessToken(auth, user.getId().toString());
         String refreshToken = jwtService.generateRandomToken();
 
         RefreshToken new_refreshTokenEntity = RefreshToken.builder()
