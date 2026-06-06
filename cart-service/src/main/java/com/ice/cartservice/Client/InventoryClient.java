@@ -1,6 +1,7 @@
 package com.ice.cartservice.Client;
 
-import com.ice.cartservice.DTO.Request.StockBatchRequest;
+import com.ice.cartservice.DTO.Request.Stock.StockBatchRequest;
+import com.ice.cartservice.DTO.Request.Stock.StockResponse;
 import com.ice.cartservice.DTO.Response.Inventory.StockBatchResponse;
 import com.ice.cartservice.Exception.ServiceUnavailableException;
 import lombok.extern.slf4j.Slf4j;
@@ -37,6 +38,20 @@ public class InventoryClient {
                     .body(new StockBatchRequest(variantId))
                     .retrieve()
                     .body(StockBatchResponse.class);
+        } catch (RestClientException e) {
+            log.error("Gọi inventory batch thất bại: {}", e.getMessage(), e);
+            throw new ServiceUnavailableException("Không lấy được tồn kho, vui lòng thử lại sau");
+        }
+    }
+
+    public StockResponse getStock(String variantId)
+    {
+        try {
+            return restClient.get()
+                    .uri("/api/v1/internal/stock/{variantId}", variantId)
+                    .header("X-Internal-Token", internalToken)
+                    .retrieve()
+                    .body(StockResponse.class);
         } catch (RestClientException e) {
             log.error("Gọi inventory batch thất bại: {}", e.getMessage(), e);
             throw new ServiceUnavailableException("Không lấy được tồn kho, vui lòng thử lại sau");

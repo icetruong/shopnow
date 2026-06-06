@@ -2,6 +2,9 @@ package com.ice.cartservice.Service;
 
 import com.ice.cartservice.Client.InventoryClient;
 import com.ice.cartservice.Client.ProductClient;
+import com.ice.cartservice.DTO.Request.Cart.CartItemAddRequest;
+import com.ice.cartservice.DTO.Request.Stock.StockResponse;
+import com.ice.cartservice.DTO.Response.Cart.CartItemAddResponse;
 import com.ice.cartservice.DTO.Response.Cart.CartItemResponse;
 import com.ice.cartservice.DTO.Response.Cart.CartSummaryResponse;
 import com.ice.cartservice.DTO.Response.Cart.ListCartItemResponse;
@@ -141,5 +144,11 @@ public class CartService {
                 ),
                 cart.getUpdatedAt()
         );
+    }
+
+    public CartItemAddResponse addCart(CartItemAddRequest request)
+    {
+
+        StockResponse stockResponse = inventoryClient.getStock(request.getVariantId());
     }
 }

@@ -1,6 +1,6 @@
 package com.ice.cartservice.Client;
 
-import com.ice.cartservice.DTO.Request.ProductBatchRequest;
+import com.ice.cartservice.DTO.Request.Product.ProductBatchRequest;
 import com.ice.cartservice.DTO.Response.Inventory.ProductBatchResponse;
 import com.ice.cartservice.Exception.ServiceUnavailableException;
 import lombok.extern.slf4j.Slf4j;
