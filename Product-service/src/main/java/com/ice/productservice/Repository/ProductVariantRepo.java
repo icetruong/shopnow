@@ -5,6 +5,7 @@ import org.jspecify.annotations.NonNull;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -16,4 +17,7 @@ public interface ProductVariantRepo extends JpaRepository<ProductVariant, UUID> 
     @EntityGraph(attributePaths = {"product"})
     @NonNull
     Optional<ProductVariant> findById(UUID id);
+
+    @EntityGraph(attributePaths = {"product"})
+    List<ProductVariant> findAllByIdIn(List<UUID> variantIds);
 }

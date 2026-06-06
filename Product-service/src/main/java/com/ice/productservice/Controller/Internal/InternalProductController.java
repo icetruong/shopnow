@@ -1,6 +1,8 @@
 package com.ice.productservice.Controller.Internal;
 
+import com.ice.productservice.DTO.Request.Internal.ProductBatchRequest;
 import com.ice.productservice.DTO.Request.Internal.ProductRatingInternalRequest;
+import com.ice.productservice.DTO.Response.Internal.ProductBatchResponse;
 import com.ice.productservice.DTO.Response.Internal.ProductInternalResponse;
 import com.ice.productservice.DTO.Response.Internal.ProductRatingInternalResponse;
 import com.ice.productservice.DTO.Response.Internal.ProductVariantInternalResponse;
@@ -37,6 +39,12 @@ public class InternalProductController {
     public ResponseEntity<ProductRatingInternalResponse> updateRating(@Valid @RequestBody ProductRatingInternalRequest request)
     {
         return ResponseEntity.ok(productService.updateRating(request));
+    }
+
+    @PostMapping("/products/variants/batch")
+    public ResponseEntity<ProductBatchResponse> getProductBatch(ProductBatchRequest request)
+    {
+        return ResponseEntity.ok(productVariantService.getProductBatch(request));
     }
 
 }

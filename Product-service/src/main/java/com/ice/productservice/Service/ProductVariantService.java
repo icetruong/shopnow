@@ -1,18 +1,23 @@
 package com.ice.productservice.Service;
 
 import com.ice.productservice.Client.InventoryClient;
+import com.ice.productservice.DTO.Request.Internal.ProductBatchRequest;
 import com.ice.productservice.DTO.Request.Internal.StockItemPostRequest;
 import com.ice.productservice.DTO.Request.Internal.StockPostRequest;
 import com.ice.productservice.DTO.Request.Product.CreateVariantProductRequest;
 import com.ice.productservice.DTO.Request.Product.UpdateVariantProductRequest;
 import com.ice.productservice.DTO.Request.Product.VariantProductRequest;
+import com.ice.productservice.DTO.Response.Internal.ProductBatchResponse;
+import com.ice.productservice.DTO.Response.Internal.ProductItemBatchResponse;
 import com.ice.productservice.DTO.Response.Internal.ProductVariantInternalResponse;
 import com.ice.productservice.DTO.Response.Product.VariantProductResponse;
 import com.ice.productservice.Entity.Product;
+import com.ice.productservice.Entity.ProductImage;
 import com.ice.productservice.Entity.ProductVariant;
 import com.ice.productservice.Exception.AlreadyExistsException;
 import com.ice.productservice.Exception.ResourceNotFoundException;
 import com.ice.productservice.Exception.VariantInActiveOrderException;
+import com.ice.productservice.Repository.ProductImageRepo;
 import com.ice.productservice.Repository.ProductRepo;
 import com.ice.productservice.Repository.ProductVariantRepo;
 import lombok.RequiredArgsConstructor;
@@ -21,13 +26,16 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
 public class ProductVariantService {
     private final ProductVariantRepo productVariantRepo;
     private final ProductRepo productRepo;
+    private final ProductImageRepo productImageRepo;
     private final InventoryClient inventoryClient;
 
     @Transactional
@@ -119,5 +127,51 @@ public class ProductVariantService {
                 productVariant.getPrice(),
                 productVariant.getIsActive()
         );
+    }
+
+    public ProductBatchResponse getProductBatch(ProductBatchRequest request) {
+        List<UUID> variantIds = request.getVariantIds().stream()
+                .map(UUID::fromString)
+                .toList();
+
+        List<ProductVariant> productVariants = productVariantRepo.findAllByIdIn(variantIds);
+
+        // Lấy thumbnail (ảnh primary) của các product trong 1 query để tránh N+1.
+        List<UUID> productIds = productVariants.stream()
+                .map(variant -> variant.getProduct().getId())
+                .distinct()
+                .toList();
+
+        Map<UUID, String> primaryThumbnails = productImageRepo
+                .findAllByProduct_IdInAndIsPrimaryTrue(productIds).stream()
+                .collect(Collectors.toMap(
+                        image -> image.getProduct().getId(),
+                        ProductImage::getUrl,
+                        (existing, replacement) -> existing));
+
+        List<ProductItemBatchResponse> productItemBatchResponses = productVariants.stream()
+                .map(variant -> new ProductItemBatchResponse(
+                        variant.getId().toString(),
+                        variant.getProduct().getId().toString(),
+                        variant.getProduct().getName(),
+                        variant.getProduct().getSlug(),
+                        resolveThumbnail(variant, primaryThumbnails),
+                        variant.getSku(),
+                        variant.getColor(),
+                        variant.getSize(),
+                        variant.getPrice(),
+                        variant.getIsActive()
+                ))
+                .toList();
+
+        return new ProductBatchResponse(productItemBatchResponses);
+    }
+
+    // Ưu tiên ảnh riêng của variant; nếu không có thì fallback về thumbnail của product.
+    private String resolveThumbnail(ProductVariant variant, Map<UUID, String> primaryThumbnails) {
+        if (variant.getImageUrl() != null) {
+            return variant.getImageUrl();
+        }
+        return primaryThumbnails.get(variant.getProduct().getId());
     }
 }

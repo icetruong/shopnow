@@ -16,4 +16,6 @@ public interface ProductImageRepo extends JpaRepository<ProductImage, UUID> {
 
     List<ProductImage> findAllByProduct_Id(UUID productId);
 
+    List<ProductImage> findAllByProduct_IdInAndIsPrimaryTrue(List<UUID> productIds);
+
 }
