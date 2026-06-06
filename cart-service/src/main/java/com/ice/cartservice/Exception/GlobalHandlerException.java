@@ -38,4 +38,10 @@ public class GlobalHandlerException {
         return ResponseEntity.badRequest()
                 .body(ApiResponse.fail(message, "INVALID_REQUEST"));
     }
+
+    @ExceptionHandler(ServiceUnavailableException.class)
+    public ResponseEntity<ApiResponse<Void>> handleServiceDown(ServiceUnavailableException ex) {
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .body(ApiResponse.fail(ex.getMessage(), "SERVICE_UNAVAILABLE"));
+    }
 }

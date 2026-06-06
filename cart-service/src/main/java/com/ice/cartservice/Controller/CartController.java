@@ -1,6 +1,7 @@
 package com.ice.cartservice.Controller;
 
 import com.ice.cartservice.DTO.Response.Cart.ListCartItemResponse;
+import com.ice.cartservice.DTO.Response.Common.ApiResponse;
 import com.ice.cartservice.Service.CartService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -18,11 +19,11 @@ public class CartController {
     private final CartService cartService;
 
     @GetMapping
-    public ResponseEntity<ListCartItemResponse> getCart(Authentication authentication)
-    {
+    public ResponseEntity<ApiResponse<ListCartItemResponse>> getCart(Authentication authentication) {
         Jwt jwt = (Jwt) authentication.getPrincipal();
         String userId = jwt.getClaimAsString("userId");
 
-        return ResponseEntity.ok(cartService.getCart(userId));
+        ListCartItemResponse data = cartService.getCart(userId);
+        return ResponseEntity.ok(ApiResponse.success("Lấy giỏ hàng thành công", data));
     }
 }

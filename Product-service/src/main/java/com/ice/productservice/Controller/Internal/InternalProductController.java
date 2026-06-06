@@ -42,7 +42,7 @@ public class InternalProductController {
     }
 
     @PostMapping("/products/variants/batch")
-    public ResponseEntity<ProductBatchResponse> getProductBatch(ProductBatchRequest request)
+    public ResponseEntity<ProductBatchResponse> getProductBatch(@Valid @RequestBody ProductBatchRequest request)
     {
         return ResponseEntity.ok(productVariantService.getProductBatch(request));
     }

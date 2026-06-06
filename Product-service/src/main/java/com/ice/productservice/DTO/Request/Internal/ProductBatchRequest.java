@@ -1,5 +1,6 @@
 package com.ice.productservice.DTO.Request.Internal;
 
+import jakarta.validation.constraints.NotEmpty;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -12,5 +13,6 @@ import java.util.List;
 @AllArgsConstructor
 @NoArgsConstructor
 public class ProductBatchRequest {
-    List<String> variantIds;
+    @NotEmpty(message = "variantIds not empty")
+    private List<String> variantIds;
 }

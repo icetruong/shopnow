@@ -12,6 +12,6 @@ import java.util.Map;
 @Builder
 public class Cart {
     private String userId;
-    private Instant updateAt;
+    private Instant updatedAt;
     private Map<String, CartItem> items;
 }

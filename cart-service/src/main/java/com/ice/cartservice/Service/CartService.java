@@ -9,9 +9,7 @@ import com.ice.cartservice.DTO.Response.Inventory.ProductBatchItemResponse;
 import com.ice.cartservice.DTO.Response.Inventory.ProductBatchResponse;
 import com.ice.cartservice.DTO.Response.Inventory.StockBatchResponse;
 import com.ice.cartservice.DTO.Response.Inventory.StockItemResponse;
-import com.ice.cartservice.Enum.ErrorCode;
 import com.ice.cartservice.Enum.StockStatus;
-import com.ice.cartservice.Exception.ResourceNotFoundException;
 import com.ice.cartservice.Model.Cart;
 import com.ice.cartservice.Model.CartItem;
 import lombok.RequiredArgsConstructor;
@@ -35,63 +33,98 @@ public class CartService {
         String cartId = "cart:" + userId;
         Cart cart = (Cart) redisTemplate.opsForValue().get(cartId);
 
-        if(cart == null)
-            throw new ResourceNotFoundException("Giỏ hàng rỗng", ErrorCode.CART_EMPTY);
-
-        List<String> variantIds = new ArrayList<>();
-        Map<String, CartItem> cartItemMap = new HashMap<>();
-
-                cart.getItems().values().forEach(
-                        cartItem -> {
-                            variantIds.add(cartItem.getVariantId());
-                            cartItemMap.put(cartItem.getVariantId(), cartItem);
-                        }
-                );
+        if (cart == null || cart.getItems() == null || cart.getItems().isEmpty()) {
+            return new ListCartItemResponse(
+                    cartId,
+                    userId,
+                    List.of(),                                   // items rỗng
+                    new CartSummaryResponse(0, 0, 0L, false),    // summary 0
+                    null                                         // updatedAt
+            );
+        }
+        List<String> variantIds = cart.getItems().values().stream()
+                .map(CartItem::getVariantId)
+                .toList();
 
         StockBatchResponse stockBatchResponse = inventoryClient.getStockBatch(variantIds);
-
         ProductBatchResponse productBatchResponse = productClient.getProductBatch(variantIds);
 
-        Map<String, StockItemResponse> stockItemMap = new HashMap<>();
+        Map<String, StockItemResponse> stockMap = new HashMap<>();
         stockBatchResponse.getData().forEach(
-                stockItemResponse -> stockItemMap.put(stockItemResponse.getVariantId(), stockItemResponse)
+                stock -> stockMap.put(stock.getVariantId(), stock)
         );
 
+        Map<String, ProductBatchItemResponse> productMap = new HashMap<>();
+        productBatchResponse.getVariants().forEach(
+                product -> productMap.put(product.getVariantId(), product)
+        );
 
-        Integer totalItems = 0;
-        Integer totalUniqueItem = 0;
+        int totalItems = 0;
+        int totalUniqueItems = 0;
         long subTotal = 0L;
-        Boolean hasUnavailableItems = false;
+        boolean hasUnavailableItems = false;
 
         List<CartItemResponse> cartItemResponses = new ArrayList<>();
-        for(ProductBatchItemResponse productBatchItemResponse : productBatchResponse.getVariants())
+
+        // Duyệt theo cart (nguồn sự thật), KHÔNG theo product response → item bị xoá vẫn hiện.
+        for (CartItem cartItem : cart.getItems().values())
         {
-            String variantId = productBatchItemResponse.getVariantId();
-            CartItem cartItem = cartItemMap.get(variantId);
-            StockItemResponse stockItemResponse = stockItemMap.get(variantId);
+            String variantId = cartItem.getVariantId();
+            ProductBatchItemResponse product = productMap.get(variantId);
+            StockItemResponse stock = stockMap.get(variantId);
+
+            totalUniqueItems++;
             totalItems += cartItem.getQty();
-            long total = productBatchItemResponse.getPrice() * cartItem.getQty();
-            subTotal += total;
-            totalUniqueItem++;
-            if(stockItemResponse.getStatus() == StockStatus.OUT_OF_STOCK)
+
+            // Product bị xoá khỏi catalog → đánh dấu không khả dụng, không giấu đi.
+            if (product == null)
+            {
                 hasUnavailableItems = true;
+                cartItemResponses.add(new CartItemResponse(
+                        cartItem.getCartItemId(),
+                        variantId,
+                        cartItem.getProductId(),
+                        null, null, null, null, null,   // name, slug, thumbnail, color, size
+                        cartItem.getSku(),
+                        0L,                              // unitPrice (Redis không lưu giá)
+                        cartItem.getQty(),
+                        0L,                              // subtotal
+                        StockStatus.OUT_OF_STOCK,
+                        0,                               // availableQty
+                        false,                           // isAvailable
+                        cartItem.getAddedAt()
+                ));
+                continue;
+            }
+
+            // Stock có thể thiếu → mặc định an toàn là hết hàng.
+            StockStatus status   = (stock != null) ? stock.getStatus()       : StockStatus.OUT_OF_STOCK;
+            Integer availableQty = (stock != null) ? stock.getAvailableQty() : 0;
+
+            // Khả dụng = product còn active VÀ còn hàng.
+            boolean isAvailable = Boolean.TRUE.equals(product.getIsActive())
+                    && status != StockStatus.OUT_OF_STOCK;
+            if (!isAvailable) hasUnavailableItems = true;
+
+            long lineTotal = product.getPrice() * cartItem.getQty();
+            subTotal += lineTotal;
 
             cartItemResponses.add(new CartItemResponse(
                     cartItem.getCartItemId(),
-                    cartItem.getVariantId(),
+                    variantId,
                     cartItem.getProductId(),
-                    productBatchItemResponse.getProductName(),
-                    productBatchItemResponse.getProductSlug(),
-                    productBatchItemResponse.getThumbnail(),
-                    productBatchItemResponse.getColor(),
-                    productBatchItemResponse.getSize(),
-                    productBatchItemResponse.getSku(),
-                    productBatchItemResponse.getPrice(),
+                    product.getProductName(),
+                    product.getProductSlug(),
+                    product.getThumbnail(),
+                    product.getColor(),
+                    product.getSize(),
+                    product.getSku(),
+                    product.getPrice(),
                     cartItem.getQty(),
-                    total,
-                    stockItemResponse.getStatus(),
-                    stockItemResponse.getAvailableQty(),
-                    stockItemResponse.getStatus() != StockStatus.OUT_OF_STOCK,
+                    lineTotal,
+                    status,
+                    availableQty,
+                    isAvailable,
                     cartItem.getAddedAt()
             ));
         }
@@ -102,11 +135,11 @@ public class CartService {
                 cartItemResponses,
                 new CartSummaryResponse(
                         totalItems,
-                        totalUniqueItem,
+                        totalUniqueItems,
                         subTotal,
                         hasUnavailableItems
                 ),
-                cart.getUpdateAt()
+                cart.getUpdatedAt()
         );
     }
 }

@@ -2,12 +2,16 @@ package com.ice.cartservice.Client;
 
 import com.ice.cartservice.DTO.Request.ProductBatchRequest;
 import com.ice.cartservice.DTO.Response.Inventory.ProductBatchResponse;
+import com.ice.cartservice.Exception.ServiceUnavailableException;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
+import org.springframework.web.client.RestClientException;
 
 import java.util.List;
 
+@Slf4j
 @Component
 public class ProductClient {
     private final RestClient restClient;
@@ -26,19 +30,16 @@ public class ProductClient {
 
     public ProductBatchResponse getProductBatch(List<String> variantIds)
     {
-        try
-        {
+        try {
             return restClient.post()
                     .uri("/api/v1/internal/products/variants/batch")
                     .header("X-Internal-Token", internalToken)
                     .body(new ProductBatchRequest(variantIds))
                     .retrieve()
                     .body(ProductBatchResponse.class);
+        } catch (RestClientException e) {
+            log.error("Gọi product batch thất bại: {}", e.getMessage(), e);
+            throw new ServiceUnavailableException("Không lấy được thông tin sản phẩm, vui lòng thử lại sau");
         }
-        catch (Exception e)
-        {
-            return new  ProductBatchResponse(List.of());
-        }
-
     }
 }
