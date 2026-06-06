@@ -704,6 +704,70 @@ Lấy thông tin variant + giá để tạo order item.
 
 ---
 
+### POST /internal/products/variants/batch
+Lấy thông tin **nhiều variant cùng lúc** theo danh sách `variantId`. Cart Service gọi endpoint này để enrich giỏ hàng (giá + tên + ảnh + trạng thái) trong **1 request duy nhất**, tránh N+1 khi cart có nhiều item.
+
+So với endpoint lẻ `GET /internal/products/{productId}/variants/{variantId}`, batch trả thêm `productName`, `productSlug`, `thumbnail` — đủ field để Cart Service dựng `CartItemResponse` mà không phải gọi thêm `GET /internal/products/{productId}`.
+
+**Header:** `X-Internal-Token: {sharedSecret}`
+
+**Request Body**
+```json
+{
+  "variantIds": ["var-uuid-1", "var-uuid-2"]
+}
+```
+
+**Validation**
+- `variantIds`: không trống, tối đa 100 phần tử/lần gọi
+
+**Response 200**
+```json
+{
+  "variants": [
+    {
+      "variantId":   "var-uuid-1",
+      "productId":   "prod-uuid-1",
+      "productName": "Áo Polo Nam Basic",
+      "productSlug": "ao-polo-nam-basic",
+      "thumbnail":   "https://storage.shopnow.com/products/ao-polo/thumb.jpg",
+      "sku":         "POLO-WHITE-S",
+      "color":       "Trắng",
+      "size":        "S",
+      "price":       249000,
+      "isActive":    true
+    },
+    {
+      "variantId":   "var-uuid-2",
+      "productId":   "prod-uuid-1",
+      "productName": "Áo Polo Nam Basic",
+      "productSlug": "ao-polo-nam-basic",
+      "thumbnail":   "https://storage.shopnow.com/products/ao-polo/thumb.jpg",
+      "sku":         "POLO-BLUE-S",
+      "color":       "Xanh navy",
+      "size":        "S",
+      "price":       249000,
+      "isActive":    true
+    }
+  ]
+}
+```
+
+**Lưu ý hành vi:**
+- `variantId` không tồn tại sẽ **bị bỏ qua** (không có trong mảng `variants`), KHÔNG trả 404 cho cả request. Cart Service tự coi variant thiếu là item không khả dụng.
+- `thumbnail` lấy `image_url` của variant; nếu variant không có ảnh riêng thì fallback về ảnh primary của product.
+- Thứ tự phần tử trong `variants` không đảm bảo trùng thứ tự `variantIds` gửi lên — client nên map theo `variantId`.
+
+**Flow bên trong:**
+```
+1. Query product_variants WHERE id IN (:variantIds)   (1 query, không loop)
+2. JOIN product để lấy name + slug
+3. Map mỗi variant → response (thumbnail: variant.image_url ?? product primary image)
+4. Trả về danh sách variant tìm được
+```
+
+---
+
 ### POST /internal/products/rating
 Review Service gọi sau khi có review mới để cập nhật điểm trung bình.
 
@@ -767,6 +831,7 @@ Review Service gọi sau khi có review mới để cập nhật điểm trung b
 | DELETE | /admin/products/{id}/images/{iid} | ✅ | ADMIN |
 | GET | /internal/products/{id} | 🔒 Internal | — |
 | GET | /internal/products/{id}/variants/{vid} | 🔒 Internal | — |
+| POST | /internal/products/variants:batch | 🔒 Internal | — |
 | POST | /internal/products/rating | 🔒 Internal | — |
 
 ---
