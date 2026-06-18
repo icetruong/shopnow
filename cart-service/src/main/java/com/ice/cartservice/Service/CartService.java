@@ -3,11 +3,9 @@ package com.ice.cartservice.Service;
 import com.ice.cartservice.Client.InventoryClient;
 import com.ice.cartservice.Client.ProductClient;
 import com.ice.cartservice.DTO.Request.Cart.CartItemAddRequest;
+import com.ice.cartservice.DTO.Request.Cart.CartItemUpdateRequest;
+import com.ice.cartservice.DTO.Response.Cart.*;
 import com.ice.cartservice.DTO.Response.Inventory.StockResponse;
-import com.ice.cartservice.DTO.Response.Cart.CartItemAddResponse;
-import com.ice.cartservice.DTO.Response.Cart.CartItemResponse;
-import com.ice.cartservice.DTO.Response.Cart.CartSummaryResponse;
-import com.ice.cartservice.DTO.Response.Cart.ListCartItemResponse;
 import com.ice.cartservice.DTO.Response.Product.ProductBatchItemResponse;
 import com.ice.cartservice.DTO.Response.Product.ProductBatchResponse;
 import com.ice.cartservice.DTO.Response.Inventory.StockBatchResponse;
@@ -22,6 +20,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.*;
 
@@ -152,7 +151,7 @@ public class CartService {
         List<String> variantIds = List.of(request.getVariantId());
         ProductBatchResponse productBatchResponse = productClient.getProductBatch(variantIds);
 
-        if(productBatchResponse.getVariants().isEmpty() || productBatchResponse.getVariants().getFirst().getIsActive() == false)
+        if(productBatchResponse.getVariants().isEmpty() || !Boolean.TRUE.equals(productBatchResponse.getVariants().getFirst().getIsActive()))
             throw new ResourceNotFoundException("Not found product by variantId" + request.getVariantId(), ErrorCode.PRODUCT_UNAVAILABLE);
 
 
@@ -162,7 +161,7 @@ public class CartService {
             throw new StockQuantityException("Sản phẩm này hiện đã hết hàng", ErrorCode.OUT_OF_STOCK);
 
         if(request.getQty() > stockResponse.getAvailableQty())
-            throw new StockQuantityException("Chỉ còn" + stockResponse.getAvailableQty() + "sản phẩm trong kho.", ErrorCode.INSUFFICIENT_STOCK);
+            throw new StockQuantityException("Chỉ còn " + stockResponse.getAvailableQty() + " sản phẩm trong kho.", ErrorCode.INSUFFICIENT_STOCK);
 
         String cartId = "cart:" + userId;
         Cart cart = (Cart) redisTemplate.opsForValue().get(cartId);
@@ -178,8 +177,9 @@ public class CartService {
                 if(Objects.equals(cartItem.getVariantId(), request.getVariantId()))
                 {
                     qty = cartItem.getQty() + request.getQty();
+                    cartItemId = cartItem.getCartItemId();
                     if(qty > stockResponse.getAvailableQty())
-                        throw new StockQuantityException("Chỉ còn" + stockResponse.getAvailableQty() + "sản phẩm trong kho.", ErrorCode.INSUFFICIENT_STOCK);
+                        throw new StockQuantityException("Chỉ còn " + stockResponse.getAvailableQty() + " sản phẩm trong kho.", ErrorCode.INSUFFICIENT_STOCK);
 
                     isHas = true;
                     cartItem.setQty(qty);
@@ -200,7 +200,7 @@ public class CartService {
                 cart.getItems().put(cartItem.getCartItemId(), cartItem);
             }
             cart.setUpdatedAt(Instant.now());
-            redisTemplate.opsForValue().set(cartId, cart, 604800);
+            redisTemplate.opsForValue().set(cartId, cart, Duration.ofDays(7));
         }
         else
         {
@@ -221,7 +221,7 @@ public class CartService {
                     .updatedAt(Instant.now())
                     .items(map)
                     .build();
-            redisTemplate.opsForValue().set(cartId, cart2, 604800);
+            redisTemplate.opsForValue().set(cartId, cart2, Duration.ofDays(7));
         }
 
         return new CartItemAddResponse(
@@ -230,5 +230,57 @@ public class CartService {
                 qty,
                 totalItem
         );
+    }
+
+    public CartItemUpdateResponse updateCart(String userId, String cartItemId, CartItemUpdateRequest request)
+    {
+        String cartId = "cart:" + userId;
+        Cart cart = (Cart) redisTemplate.opsForValue().get(cartId);
+
+        if(cart == null)
+            throw new ResourceNotFoundException("not found cart", ErrorCode.CART_ITEM_NOT_FOUND);
+        CartItem cartItem = cart.getItems().get(cartItemId);
+        if(cartItem == null)
+            throw new ResourceNotFoundException("not found cart", ErrorCode.CART_ITEM_NOT_FOUND);
+
+        StockResponse stockResponse = inventoryClient.getStock(cartItem.getVariantId());
+        if(request.getQty() > stockResponse.getAvailableQty())
+            throw new StockQuantityException("Chỉ còn " + stockResponse.getAvailableQty() + " sản phẩm trong kho.", ErrorCode.INSUFFICIENT_STOCK);
+
+        cartItem.setQty(request.getQty());
+
+        redisTemplate.opsForValue().set(cartId, cart, Duration.ofDays(7));
+
+        return new CartItemUpdateResponse(
+                cartItemId,
+                cartItem.getVariantId(),
+                request.getQty(),
+                cart.getItems().size()
+        );
+    }
+
+    public CartItemDeleteResponse deleteCartItem(String userId, String cartItemId)
+    {
+        String cartId = "cart:" + userId;
+        Cart cart = (Cart) redisTemplate.opsForValue().get(cartId);
+
+        if(cart == null)
+            throw new ResourceNotFoundException("not found cart", ErrorCode.CART_ITEM_NOT_FOUND);
+        CartItem cartItem = cart.getItems().remove(cartItemId);
+        if(cartItem == null)
+            throw new ResourceNotFoundException("not found cart", ErrorCode.CART_ITEM_NOT_FOUND);
+        redisTemplate.opsForValue().set(cartId, cart, Duration.ofDays(7));
+
+        return new CartItemDeleteResponse(
+                cartItemId,
+                cartItem.getVariantId(),
+                cart.getItems().size()
+        );
+    }
+
+    public void deleteCart(String userId)
+    {
+        String cartId = "cart:" + userId;
+        redisTemplate.delete(cartId);
     }
 }

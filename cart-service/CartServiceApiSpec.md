@@ -180,10 +180,11 @@ Cập nhật số lượng của 1 item trong giỏ.
 ```json
 {
   "success": true,
+  "message": "Đã cập nhật số lượng sản phẩm.",
   "data": {
     "cartItemId": "item-uuid-1",
+    "variantId":  "var-uuid-1",
     "qty":        3,
-    "subtotal":   747000,
     "totalItems": 4
   }
 }
@@ -195,9 +196,6 @@ Cập nhật số lượng của 1 item trong giỏ.
   "success": false,
   "code":    "INSUFFICIENT_STOCK",
   "message": "Chỉ còn 2 sản phẩm trong kho.",
-  "data": {
-    "availableQty": 2
-  }
 }
 ```
 
@@ -223,7 +221,11 @@ Xóa 1 item khỏi giỏ hàng.
 {
   "success":    true,
   "message":    "Đã xóa sản phẩm khỏi giỏ hàng.",
-  "totalItems": 2
+  "data": {
+    "cartItemId": "item-uuid-1",
+    "variantId":  "var-uuid-1",
+    "totalItems": 2
+  }
 }
 ```
 
