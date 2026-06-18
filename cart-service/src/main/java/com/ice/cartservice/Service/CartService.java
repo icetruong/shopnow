@@ -373,7 +373,7 @@ public class CartService {
                 // issue: QTY_REDUCED (giảm qty xuống)
                 issues.add(new CartValidationIssue(
                         cartItem.getCartItemId(),
-                        ErrorCode.INSUFFICIENT_STOCK,
+                        ErrorCode.QTY_REDUCED,
                         "Chỉ còn "+ stockItemResponse.getAvailableQty() + " sản phẩm trong kho",
                         cartItem.getQty(),
                         stockItemResponse.getAvailableQty()

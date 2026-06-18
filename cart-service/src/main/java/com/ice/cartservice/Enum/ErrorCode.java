@@ -3,6 +3,7 @@ package com.ice.cartservice.Enum;
 public enum ErrorCode {
     OUT_OF_STOCK, // Sản phẩm hết hàng
     INSUFFICIENT_STOCK, // Không đủ số lượng yêu cầu
+    QTY_REDUCED, // Không đủ số lượng khi validate checkout
     CART_ITEM_NOT_FOUND, // CartItemId không tồn tại trong giỏ
     CART_EMPTY, // Giỏ hàng rỗng
     CART_VALIDATION_FAILED, // Có item hết hàng / giá thay đổi
