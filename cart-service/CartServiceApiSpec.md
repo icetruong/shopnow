@@ -144,9 +144,6 @@ Thêm sản phẩm vào giỏ hàng.
   "success": false,
   "code":    "INSUFFICIENT_STOCK",
   "message": "Chỉ còn 3 sản phẩm trong kho.",
-  "data": {
-    "availableQty": 3
-  }
 }
 ```
 

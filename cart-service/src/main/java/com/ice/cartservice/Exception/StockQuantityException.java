@@ -1,7 +1,13 @@
 package com.ice.cartservice.Exception;
 
+import com.ice.cartservice.Enum.ErrorCode;
+import lombok.Getter;
+
+@Getter
 public class StockQuantityException extends RuntimeException {
-  public StockQuantityException(String message) {
-    super(message);
-  }
+    private final ErrorCode errorCode;
+    public StockQuantityException(String message, ErrorCode errorCode) {
+        super(message);
+        this.errorCode = errorCode;
+    }
 }

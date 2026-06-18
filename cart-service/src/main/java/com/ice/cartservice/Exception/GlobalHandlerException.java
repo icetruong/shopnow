@@ -44,4 +44,11 @@ public class GlobalHandlerException {
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
                 .body(ApiResponse.fail(ex.getMessage(), "SERVICE_UNAVAILABLE"));
     }
+
+    @ExceptionHandler(StockQuantityException.class)
+    public ResponseEntity<ApiResponse<Void>> handleStockQuantity(StockQuantityException ex)
+    {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(ApiResponse.fail(ex.getMessage(), ex.getErrorCode().toString()));
+    }
 }

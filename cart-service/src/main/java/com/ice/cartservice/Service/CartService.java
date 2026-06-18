@@ -3,26 +3,27 @@ package com.ice.cartservice.Service;
 import com.ice.cartservice.Client.InventoryClient;
 import com.ice.cartservice.Client.ProductClient;
 import com.ice.cartservice.DTO.Request.Cart.CartItemAddRequest;
-import com.ice.cartservice.DTO.Request.Stock.StockResponse;
+import com.ice.cartservice.DTO.Response.Inventory.StockResponse;
 import com.ice.cartservice.DTO.Response.Cart.CartItemAddResponse;
 import com.ice.cartservice.DTO.Response.Cart.CartItemResponse;
 import com.ice.cartservice.DTO.Response.Cart.CartSummaryResponse;
 import com.ice.cartservice.DTO.Response.Cart.ListCartItemResponse;
-import com.ice.cartservice.DTO.Response.Inventory.ProductBatchItemResponse;
-import com.ice.cartservice.DTO.Response.Inventory.ProductBatchResponse;
+import com.ice.cartservice.DTO.Response.Product.ProductBatchItemResponse;
+import com.ice.cartservice.DTO.Response.Product.ProductBatchResponse;
 import com.ice.cartservice.DTO.Response.Inventory.StockBatchResponse;
 import com.ice.cartservice.DTO.Response.Inventory.StockItemResponse;
+import com.ice.cartservice.Enum.ErrorCode;
 import com.ice.cartservice.Enum.StockStatus;
+import com.ice.cartservice.Exception.ResourceNotFoundException;
+import com.ice.cartservice.Exception.StockQuantityException;
 import com.ice.cartservice.Model.Cart;
 import com.ice.cartservice.Model.CartItem;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.time.Instant;
+import java.util.*;
 
 @Service
 @RequiredArgsConstructor
@@ -146,9 +147,88 @@ public class CartService {
         );
     }
 
-    public CartItemAddResponse addCart(CartItemAddRequest request)
+    public CartItemAddResponse addCart(String userId, CartItemAddRequest request)
     {
+        List<String> variantIds = List.of(request.getVariantId());
+        ProductBatchResponse productBatchResponse = productClient.getProductBatch(variantIds);
+
+        if(productBatchResponse.getVariants().isEmpty() || productBatchResponse.getVariants().getFirst().getIsActive() == false)
+            throw new ResourceNotFoundException("Not found product by variantId" + request.getVariantId(), ErrorCode.PRODUCT_UNAVAILABLE);
+
 
         StockResponse stockResponse = inventoryClient.getStock(request.getVariantId());
+
+        if(stockResponse.getAvailableQty() == 0)
+            throw new StockQuantityException("Sản phẩm này hiện đã hết hàng", ErrorCode.OUT_OF_STOCK);
+
+        if(request.getQty() > stockResponse.getAvailableQty())
+            throw new StockQuantityException("Chỉ còn" + stockResponse.getAvailableQty() + "sản phẩm trong kho.", ErrorCode.INSUFFICIENT_STOCK);
+
+        String cartId = "cart:" + userId;
+        Cart cart = (Cart) redisTemplate.opsForValue().get(cartId);
+        String cartItemId = UUID.randomUUID().toString();
+        int totalItem = 0;
+        int qty = request.getQty();
+        if(cart != null)
+        {
+            boolean isHas = false;
+            for (CartItem cartItem : cart.getItems().values())
+            {
+                totalItem++;
+                if(Objects.equals(cartItem.getVariantId(), request.getVariantId()))
+                {
+                    qty = cartItem.getQty() + request.getQty();
+                    if(qty > stockResponse.getAvailableQty())
+                        throw new StockQuantityException("Chỉ còn" + stockResponse.getAvailableQty() + "sản phẩm trong kho.", ErrorCode.INSUFFICIENT_STOCK);
+
+                    isHas = true;
+                    cartItem.setQty(qty);
+                }
+            }
+            if(!isHas)
+            {
+                totalItem++;
+                CartItem cartItem = CartItem.builder()
+                        .cartItemId(cartItemId)
+                        .variantId(stockResponse.getVariantId())
+                        .productId(productBatchResponse.getVariants().getFirst().getProductId())
+                        .sku(productBatchResponse.getVariants().getFirst().getSku())
+                        .qty(request.getQty())
+                        .selected(false)
+                        .addedAt(Instant.now())
+                        .build();
+                cart.getItems().put(cartItem.getCartItemId(), cartItem);
+            }
+            cart.setUpdatedAt(Instant.now());
+            redisTemplate.opsForValue().set(cartId, cart, 604800);
+        }
+        else
+        {
+            totalItem = 1;
+            Map<String, CartItem> map = new HashMap<>();
+            CartItem cartItem = CartItem.builder()
+                    .cartItemId(cartItemId)
+                    .variantId(stockResponse.getVariantId())
+                    .productId(productBatchResponse.getVariants().getFirst().getProductId())
+                    .sku(productBatchResponse.getVariants().getFirst().getSku())
+                    .qty(request.getQty())
+                    .selected(false)
+                    .addedAt(Instant.now())
+                    .build();
+            map.put(cartItem.getCartItemId(), cartItem);
+            Cart cart2 = Cart.builder()
+                    .userId(userId)
+                    .updatedAt(Instant.now())
+                    .items(map)
+                    .build();
+            redisTemplate.opsForValue().set(cartId, cart2, 604800);
+        }
+
+        return new CartItemAddResponse(
+                cartItemId,
+                request.getVariantId(),
+                qty,
+                totalItem
+        );
     }
 }

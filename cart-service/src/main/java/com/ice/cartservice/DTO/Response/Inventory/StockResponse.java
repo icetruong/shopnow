@@ -1,4 +1,4 @@
-package com.ice.cartservice.DTO.Request.Stock;
+package com.ice.cartservice.DTO.Response.Inventory;
 
 import com.ice.cartservice.Enum.StockStatus;
 import lombok.AllArgsConstructor;
