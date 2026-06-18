@@ -1,4 +1,4 @@
-package com.ice.cartservice.DTO.Response.Inventory;
+package com.ice.cartservice.DTO.Response.Product;
 
 import lombok.AllArgsConstructor;
 import lombok.Getter;
