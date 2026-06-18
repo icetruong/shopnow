@@ -3,19 +3,25 @@ package com.ice.cartservice.Service;
 import com.ice.cartservice.Client.InventoryClient;
 import com.ice.cartservice.Client.ProductClient;
 import com.ice.cartservice.DTO.Request.Cart.CartItemAddRequest;
+import com.ice.cartservice.DTO.Request.Cart.CartItemCheckoutRequest;
+import com.ice.cartservice.DTO.Request.Cart.CartItemSelectRequest;
 import com.ice.cartservice.DTO.Request.Cart.CartItemUpdateRequest;
 import com.ice.cartservice.DTO.Response.Cart.*;
-import com.ice.cartservice.DTO.Response.Inventory.StockResponse;
-import com.ice.cartservice.DTO.Response.Product.ProductBatchItemResponse;
-import com.ice.cartservice.DTO.Response.Product.ProductBatchResponse;
 import com.ice.cartservice.DTO.Response.Inventory.StockBatchResponse;
 import com.ice.cartservice.DTO.Response.Inventory.StockItemResponse;
+import com.ice.cartservice.DTO.Response.Inventory.StockResponse;
+import com.ice.cartservice.DTO.Response.Issue.CartValidationIssue;
+import com.ice.cartservice.DTO.Response.Product.ProductBatchItemResponse;
+import com.ice.cartservice.DTO.Response.Product.ProductBatchResponse;
 import com.ice.cartservice.Enum.ErrorCode;
 import com.ice.cartservice.Enum.StockStatus;
+import com.ice.cartservice.Exception.CartValidationException;
 import com.ice.cartservice.Exception.ResourceNotFoundException;
 import com.ice.cartservice.Exception.StockQuantityException;
 import com.ice.cartservice.Model.Cart;
 import com.ice.cartservice.Model.CartItem;
+import com.ice.cartservice.Model.CheckoutToken;
+import com.ice.cartservice.Model.ItemCheckoutToken;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
@@ -282,5 +288,170 @@ public class CartService {
     {
         String cartId = "cart:" + userId;
         redisTemplate.delete(cartId);
+    }
+
+    public void updateSelectCartItem(String userId, CartItemSelectRequest request)
+    {
+        String cartId = "cart:" + userId;
+        Cart cart = (Cart) redisTemplate.opsForValue().get(cartId);
+
+        if(cart == null)
+            throw new ResourceNotFoundException("not found cart", ErrorCode.CART_ITEM_NOT_FOUND);
+
+        for (String cartItemId : request.getCartItemIds())
+        {
+            CartItem cartItem = cart.getItems().get(cartItemId);
+            if(cartItem == null)
+                throw new ResourceNotFoundException("not found cart", ErrorCode.CART_ITEM_NOT_FOUND);
+
+            cartItem.setSelected(request.getSelected());
+        }
+
+        redisTemplate.opsForValue().set(cartId, cart, Duration.ofDays(7));
+    }
+
+    public CartItemCheckoutResponse checkout(String userId, CartItemCheckoutRequest request)
+    {
+        String cartId = "cart:" + userId;
+        Cart cart = (Cart) redisTemplate.opsForValue().get(cartId);
+
+        if(cart == null)
+            throw new ResourceNotFoundException("not found cart", ErrorCode.CART_ITEM_NOT_FOUND);
+
+        List<String> variantIds = new ArrayList<>();
+        List<CartItem> cartItems = new ArrayList<>();
+        request.getCartItemIds().forEach(
+                cartItemId -> {
+                    CartItem cartItem = cart.getItems().get(cartItemId);
+                    if(cartItem == null)
+                        throw new ResourceNotFoundException("not found cart", ErrorCode.CART_ITEM_NOT_FOUND);
+                    variantIds.add(cartItem.getVariantId());
+                    cartItems.add(cartItem);
+                }
+        );
+
+        StockBatchResponse stockBatchResponse = inventoryClient.getStockBatch(variantIds);
+        ProductBatchResponse productBatchResponse = productClient.getProductBatch(variantIds);
+
+        Map<String, StockItemResponse> stockMap = new HashMap<>();
+        stockBatchResponse.getData().forEach(
+                stock -> stockMap.put(stock.getVariantId(), stock)
+        );
+
+        Map<String, ProductBatchItemResponse> productMap = new HashMap<>();
+        productBatchResponse.getVariants().forEach(
+                product -> productMap.put(product.getVariantId(), product)
+        );
+        List<CartValidationIssue> issues = new ArrayList<>();
+        for(CartItem cartItem : cartItems)
+        {
+            ProductBatchItemResponse productBatchItemResponse = productMap.get(cartItem.getVariantId());
+            StockItemResponse stockItemResponse = stockMap.get(cartItem.getVariantId());
+            if(productBatchItemResponse == null || !Boolean.TRUE.equals(productBatchItemResponse.getIsActive()))
+            {
+                // issue: PRODUCT_UNAVAILABLE
+                issues.add(new CartValidationIssue(
+                        cartItem.getCartItemId(),
+                        ErrorCode.PRODUCT_UNAVAILABLE,
+                        "sản phẩm không còn tồn tại nữa",
+                        null,
+                        null
+                ));
+                continue;
+            }
+
+            if(stockItemResponse == null || stockItemResponse.getAvailableQty() == 0)
+            {
+                // issue: OUT_OF_STOCK
+                issues.add(new CartValidationIssue(
+                        cartItem.getCartItemId(),
+                        ErrorCode.OUT_OF_STOCK,
+                        "sản phẩm đã hết hàng.",
+                        null,
+                        null
+                ));
+            }
+            else if(stockItemResponse.getAvailableQty() < cartItem.getQty())
+            {
+                // issue: QTY_REDUCED (giảm qty xuống)
+                issues.add(new CartValidationIssue(
+                        cartItem.getCartItemId(),
+                        ErrorCode.INSUFFICIENT_STOCK,
+                        "Chỉ còn "+ stockItemResponse.getAvailableQty() + " sản phẩm trong kho",
+                        cartItem.getQty(),
+                        stockItemResponse.getAvailableQty()
+                ));
+            }
+
+            // cart Item làm gì có price mà check price khác giá
+        }
+
+        if(!issues.isEmpty())
+        {
+            throw new CartValidationException("Giỏ hàng có thay đổi, vui lòng kiểm tra lại.",issues);
+        }
+
+        if (request.getCouponCode() != null && !request.getCouponCode().isBlank())
+        {
+            // gọi promotion Service( chưa có nên chưa làm)
+        }
+
+        List<ItemCheckoutResponse> itemCheckoutResponses = new ArrayList<>();
+        List<ItemCheckoutToken> itemCheckoutTokens = new ArrayList<>();
+        long subtotal = 0L;
+        for(CartItem cartItem : cartItems)
+        {
+            ProductBatchItemResponse productBatchItemResponse = productMap.get(cartItem.getVariantId());
+            Long total = productBatchItemResponse.getPrice() * cartItem.getQty();
+            subtotal += total;
+            itemCheckoutResponses.add(new ItemCheckoutResponse(
+                    cartItem.getCartItemId(),
+                    cartItem.getVariantId(),
+                    productBatchItemResponse.getProductName(),
+                    productBatchItemResponse.getColor(),
+                    productBatchItemResponse.getSize(),
+                    productBatchItemResponse.getPrice(),
+                    cartItem.getQty(),
+                    total,
+                    true
+            ));
+
+            itemCheckoutTokens.add(ItemCheckoutToken.builder()
+                    .cartItemId(cartItem.getCartItemId())
+                    .variantId(cartItem.getVariantId())
+                    .productId(productBatchItemResponse.getProductId())
+                    .sku(productBatchItemResponse.getSku())
+                    .unitPrice(productBatchItemResponse.getPrice())
+                    .qty(cartItem.getQty())
+                    .subtotal(total)
+                    .build()
+            );
+        }
+
+        String checkoutToken = UUID.randomUUID().toString();
+
+        String checkoutTokenId = "checkout:" + checkoutToken;
+        Instant expiresAt = Instant.now().plusSeconds(900);
+        CheckoutToken token = CheckoutToken.builder()
+                .checkoutToken(checkoutToken)
+                .userId(userId)
+                .items(itemCheckoutTokens)
+                .couponCode(request.getCouponCode())
+                .discountAmt(0L)
+                .shippingFee(0L)
+                .total(subtotal)
+                .addressId(request.getAddressId())
+                .validatedAt(Instant.now())
+                .expiresAt(expiresAt)
+                .build();
+        redisTemplate.opsForValue().set(checkoutTokenId, token, Duration.ofMinutes(15));
+
+        return new CartItemCheckoutResponse(
+                itemCheckoutResponses,
+                null,
+                new PricingItemCheckoutResponse(subtotal, 0L, 0L, subtotal),
+                checkoutToken,
+                expiresAt
+        );
     }
 }

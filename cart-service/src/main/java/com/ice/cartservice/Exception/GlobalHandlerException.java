@@ -1,6 +1,7 @@
 package com.ice.cartservice.Exception;
 
 import com.ice.cartservice.DTO.Response.Common.ApiResponse;
+import com.ice.cartservice.DTO.Response.Issue.CartValidationIssuesData;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -50,5 +51,13 @@ public class GlobalHandlerException {
     {
         return ResponseEntity.status(HttpStatus.CONFLICT)
                 .body(ApiResponse.fail(ex.getMessage(), ex.getErrorCode().toString()));
+    }
+
+    @ExceptionHandler(CartValidationException.class)
+    public ResponseEntity<ApiResponse<CartValidationIssuesData>> handleCartValidation(CartValidationException ex)
+    {
+        return ResponseEntity.badRequest()
+                .body(new ApiResponse<>(false, ex.getMessage(),
+                        new CartValidationIssuesData(ex.getIssues()), "CART_VALIDATION_FAILED"));
     }
 }

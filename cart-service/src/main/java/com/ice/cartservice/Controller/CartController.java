@@ -1,11 +1,10 @@
 package com.ice.cartservice.Controller;
 
 import com.ice.cartservice.DTO.Request.Cart.CartItemAddRequest;
+import com.ice.cartservice.DTO.Request.Cart.CartItemCheckoutRequest;
+import com.ice.cartservice.DTO.Request.Cart.CartItemSelectRequest;
 import com.ice.cartservice.DTO.Request.Cart.CartItemUpdateRequest;
-import com.ice.cartservice.DTO.Response.Cart.CartItemAddResponse;
-import com.ice.cartservice.DTO.Response.Cart.CartItemDeleteResponse;
-import com.ice.cartservice.DTO.Response.Cart.CartItemUpdateResponse;
-import com.ice.cartservice.DTO.Response.Cart.ListCartItemResponse;
+import com.ice.cartservice.DTO.Response.Cart.*;
 import com.ice.cartservice.DTO.Response.Common.ApiResponse;
 import com.ice.cartservice.Service.CartService;
 import jakarta.validation.Valid;
@@ -84,6 +83,35 @@ public class CartController {
                 ApiResponse.success(
                         "Đã xóa giỏ hàng.",
                         null
+                )
+        );
+    }
+
+    @PostMapping("/select")
+    public ResponseEntity<ApiResponse<Void>> updateSelectCartItem(Authentication authentication, @Valid @RequestBody CartItemSelectRequest request)
+    {
+        Jwt jwt = (Jwt) authentication.getPrincipal();
+        String userId = jwt.getClaimAsString("userId");
+
+        cartService.updateSelectCartItem(userId, request);
+        return ResponseEntity.ok(
+                ApiResponse.success(
+                        "Đã cập nhật lựa chọn.",
+                        null
+                )
+        );
+    }
+
+    @PostMapping("/checkout/validate")
+    public ResponseEntity<ApiResponse<CartItemCheckoutResponse>> checkoutItem(Authentication authentication, @Valid @RequestBody CartItemCheckoutRequest request)
+    {
+        Jwt jwt = (Jwt) authentication.getPrincipal();
+        String userId = jwt.getClaimAsString("userId");
+
+        return ResponseEntity.ok(
+                ApiResponse.success(
+                        "Giỏ hàng hợp lệ, sẵn sàng checkout.",
+                        cartService.checkout(userId, request)
                 )
         );
     }

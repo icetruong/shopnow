@@ -296,6 +296,7 @@ Validate toàn bộ giỏ hàng trước khi chuyển sang trang thanh toán.
 ```json
 {
   "success": true,
+  "message": "Giỏ hàng hợp lệ, sẵn sàng checkout.",
   "data": {
     "items": [
       {
