@@ -385,7 +385,11 @@ Validate toàn bộ giỏ hàng trước khi chuyển sang trang thanh toán.
 
 ---
 
-### POST /cart/checkout/confirm
+## 3. INTERNAL
+
+---
+
+### POST /internal/cart/checkout/confirm
 Order Service gọi internal sau khi tạo order thành công để xóa các item đã đặt khỏi giỏ.
 
 **Header:** `X-Internal-Token: {sharedSecret}`
@@ -414,10 +418,6 @@ Order Service gọi internal sau khi tạo order thành công để xóa các it
 3. DEL checkout:{checkoutToken}
 4. Nếu cart rỗng → DEL cart:{userId} luôn
 ```
-
----
-
-## 3. INTERNAL
 
 ---
 
@@ -485,7 +485,7 @@ Order Service gọi để lấy cart data đã validate khi tạo order.
 | DELETE | /cart | ✅ | USER |
 | POST | /cart/select | ✅ | USER |
 | POST | /cart/checkout/validate | ✅ | USER |
-| POST | /cart/checkout/confirm | 🔒 Internal | — |
+| POST | /internal/cart/checkout/confirm | 🔒 Internal | — |
 | GET | /internal/cart/checkout/{token} | 🔒 Internal | — |
 
 ---

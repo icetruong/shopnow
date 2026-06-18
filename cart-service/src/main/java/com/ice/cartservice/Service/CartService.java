@@ -2,10 +2,7 @@ package com.ice.cartservice.Service;
 
 import com.ice.cartservice.Client.InventoryClient;
 import com.ice.cartservice.Client.ProductClient;
-import com.ice.cartservice.DTO.Request.Cart.CartItemAddRequest;
-import com.ice.cartservice.DTO.Request.Cart.CartItemCheckoutRequest;
-import com.ice.cartservice.DTO.Request.Cart.CartItemSelectRequest;
-import com.ice.cartservice.DTO.Request.Cart.CartItemUpdateRequest;
+import com.ice.cartservice.DTO.Request.Cart.*;
 import com.ice.cartservice.DTO.Response.Cart.*;
 import com.ice.cartservice.DTO.Response.Inventory.StockBatchResponse;
 import com.ice.cartservice.DTO.Response.Inventory.StockItemResponse;
@@ -452,6 +449,63 @@ public class CartService {
                 new PricingItemCheckoutResponse(subtotal, 0L, 0L, subtotal),
                 checkoutToken,
                 expiresAt
+        );
+    }
+
+    public void confirmCheckout(CartItemCheckoutConfirmRequest request)
+    {
+        String checkoutTokenId = "checkout:" + request.getCheckoutToken();
+        CheckoutToken token = (CheckoutToken) redisTemplate.opsForValue().get(checkoutTokenId);
+        if(token == null)
+            throw new ResourceNotFoundException("checkout token đã hết hạn", ErrorCode.CHECKOUT_TOKEN_EXPIRED);
+
+        String cartId = "cart:" + request.getUserId();
+        Cart cart = (Cart) redisTemplate.opsForValue().get(cartId);
+
+        if(cart == null)
+            throw new ResourceNotFoundException("not found cart", ErrorCode.CART_ITEM_NOT_FOUND);
+
+        for (String cartItemId : request.getCartItemIds())
+        {
+            CartItem cartItem = cart.getItems().remove(cartItemId);
+            if(cartItem == null)
+                throw new ResourceNotFoundException("not found cart", ErrorCode.CART_ITEM_NOT_FOUND);
+        }
+        if(cart.getItems().isEmpty())
+            redisTemplate.delete(cartId);
+        else
+            redisTemplate.opsForValue().set(cartId, cart, Duration.ofDays(7));
+
+        redisTemplate.delete(checkoutTokenId);
+    }
+
+    public CartDataCheckoutTokenResponse getDataCheckout(String checkoutToken)
+    {
+        String checkoutTokenId = "checkout:" + checkoutToken;
+        CheckoutToken token = (CheckoutToken) redisTemplate.opsForValue().get(checkoutTokenId);
+        if(token == null)
+            throw new ResourceNotFoundException("checkout token đã hết hạn", ErrorCode.CHECKOUT_TOKEN_EXPIRED);
+
+        List<CartItemDataCheckoutTokenResponse> checkoutTokenResponses = token.getItems()
+                .stream().map(
+                        itemCheckoutToken -> new CartItemDataCheckoutTokenResponse(
+                                itemCheckoutToken.getVariantId(),
+                                itemCheckoutToken.getProductId(),
+                                itemCheckoutToken.getSku(),
+                                itemCheckoutToken.getUnitPrice(),
+                                itemCheckoutToken.getQty(),
+                                itemCheckoutToken.getSubtotal()
+                        )
+                ).toList();
+
+        return new CartDataCheckoutTokenResponse(
+                token.getUserId(),
+                checkoutTokenResponses,
+                token.getCouponCode(),
+                token.getDiscountAmt(),
+                token.getTotal(),
+                token.getValidatedAt(),
+                token.getExpiresAt()
         );
     }
 }
