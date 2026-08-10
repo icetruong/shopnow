@@ -41,6 +41,7 @@ Tạo đơn hàng mới từ checkout token. Đây là điểm khởi đầu c�
 ```json
 {
   "success": true,
+  "message": "Đặt hàng thành công",
   "data": {
     "orderId":     "order-uuid-1",
     "orderCode":   "SN240115001",
@@ -101,6 +102,7 @@ endDate   = 2024-01-31
 ```json
 {
   "success": true,
+  "message": "Lấy danh sách đơn hàng thành công",
   "data": {
     "content": [
       {
@@ -133,6 +135,7 @@ Lấy chi tiết 1 đơn hàng đầy đủ.
 ```json
 {
   "success": true,
+  "message": "Lấy chi tiết đơn hàng thành công",
   "data": {
     "orderId":     "order-uuid-1",
     "orderCode":   "SN240115001",

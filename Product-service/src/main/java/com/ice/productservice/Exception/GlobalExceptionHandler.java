@@ -82,6 +82,4 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.CONFLICT)
                 .body(ApiResponse.fail(ex.getMessage(), "ALREADY_EXISTS"));
     }
-
-
 }

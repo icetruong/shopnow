@@ -1,4 +1,10 @@
 package com.ice.orderservice.Enum;
 
 public enum ErrorCode {
+    CHECKOUT_TOKEN_EXPIRED,
+    ORDER_NOT_FOUND,
+    ORDER_CANNOT_CANCEL,
+    INVALID_STATUS_TRANSITION,
+    PAYMENT_VERIFICATION_FAILED,
+    ORDER_ACCESS_DENIED
 }
