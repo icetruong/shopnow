@@ -74,13 +74,22 @@ Tạo đơn hàng mới từ checkout token. Đây là điểm khởi đầu c�
 2. Gọi User Service: GET /internal/users/{userId}
    → lấy địa chỉ giao hàng
 3. BEGIN TRANSACTION (local)
-   a. INSERT order (status = PENDING)
+   a. INSERT order (status = PENDING, payment_status = UNPAID)
    b. INSERT order_items (snapshot giá, tên, variant lúc đặt)
-   c. INSERT saga_state (status = STARTED, step = ORDER_CREATED)
+   c. INSERT order_shipping_address (snapshot địa chỉ)
+   d. INSERT saga_state (status = STARTED, step = ORDER_CREATED)
    COMMIT
-4. Publish Kafka event order.created
-5. Trả response cho client (paymentUrl nếu online payment)
+4. Gọi Payment Service (REST đồng bộ, X-Internal-Token):
+   POST /payments/create { orderId, orderCode, amount, method, returnUrl, bankCode }
+   → VNPAY/MOMO: nhận về paymentId + paymentUrl
+   → COD: nhận về paymentId, status = PENDING, không có paymentUrl
+   → Lỗi (GATEWAY_ERROR...) → ROLLBACK bước 3, trả lỗi cho client, KHÔNG publish event
+5. UPDATE saga_state: completed_steps += "PAYMENT_INITIATED"
+6. Publish Kafka event order.created (kèm paymentId)
+7. Trả response cho client (paymentUrl nếu online payment, hoặc message COD)
 ```
+
+**Lưu ý quan trọng:** `paymentUrl` phải lấy được **ngay tại request này** nên bước gọi Payment Service ở trên **bắt buộc là REST đồng bộ**, không phải chờ qua Kafka (Kafka là async, không kịp trả trong cùng response).
 
 ---
 
@@ -215,49 +224,32 @@ User hủy đơn hàng (chỉ hủy được khi status = PENDING hoặc CONFIRM
 }
 ```
 
-**Flow:** Trigger compensating — publish `order.cancelled` → Inventory release stock, Payment refund (nếu đã thanh toán).
-
----
-
-## 2. PAYMENT CALLBACK — Webhook từ cổng thanh toán
-
----
-
-### GET /orders/payment/vnpay/callback
-VNPay redirect user về sau khi thanh toán (return URL).
-
-**Query Params:** VNPay tự gửi (vnp_ResponseCode, vnp_TxnRef, vnp_SecureHash...)
-
-**Response:** Redirect về frontend
+**Flow:** Đọc `saga_state.completed_steps` để biết cần compensate gì:
 ```
-http://localhost:3000/orders/{orderId}/result?status=success
+1. Nếu completed_steps có PAYMENT_PROCESSED:
+   a. UPDATE order status = REFUNDING
+   b. Gọi REST đồng bộ (X-Internal-Token): POST /payments/{paymentId}/refund
+      { orderId, amount, reason: "ORDER_CANCELLED_BY_USER" }
+   c. Chờ Payment Service publish payment.refunded → UPDATE order status = REFUNDED
+2. Nếu chưa thanh toán (chưa có PAYMENT_PROCESSED):
+   → UPDATE order status = CANCELLED ngay
+3. Publish order.cancelled (needReleaseStock tính theo completed_steps có STOCK_RESERVED/STOCK_DEDUCTED)
+   → Inventory release/cộng lại stock, Notification gửi email
 ```
 
 ---
 
-### POST /orders/payment/vnpay/ipn
-VNPay gọi server-to-server (IPN — Instant Payment Notification). Đây mới là nguồn tin cậy để xác nhận thanh toán, không phải return URL.
+## 2. THANH TOÁN — Payment Service sở hữu webhook
 
-**Request:** VNPay gửi params
+---
 
-**Response 200** — bắt buộc trả về đúng format VNPay yêu cầu
-```json
-{
-  "RspCode": "00",
-  "Message": "Confirm Success"
-}
-```
+Order Service **không** expose endpoint webhook thanh toán (VNPay/MoMo/Stripe). Toàn bộ việc verify chữ ký, chống xử lý trùng (idempotency) và xác nhận thanh toán do **Payment Service** đảm nhiệm (xem `paymentServiceApiSpec.md`) — đây là service duy nhất sở hữu bảng `payments`/`processed_webhooks` nên phải là nguồn xác nhận duy nhất, tránh 2 service cùng verify signature và cùng publish trùng event.
 
-**Flow bên trong:**
-```
-1. Verify vnp_SecureHash (chống giả mạo)
-2. Kiểm tra idempotency: orderId này đã xử lý chưa? (tránh VNPay gọi 2 lần)
-3. Nếu vnp_ResponseCode = "00" → thanh toán thành công
-   → publish payment.processed (status = SUCCESS)
-4. Nếu khác → thanh toán thất bại
-   → publish payment.processed (status = FAILED)
-   → trigger compensating
-```
+Order Service chỉ phản ứng lại bằng cách consume các Kafka event do Payment Service publish:
+- `payment.processed` (SUCCESS / FAILED)
+- `payment.refunded`
+
+Xem chi tiết ở PHẦN 3 — mục "Choreography — Order Service consume những event nào".
 
 ---
 
@@ -331,7 +323,7 @@ CANCELLED       CANCELLED
 
 Trạng thái:
 PENDING     — Vừa tạo, chờ thanh toán + reserve stock
-CONFIRMED   — Đã thanh toán + đã trừ kho, chờ shop xử lý
+CONFIRMED   — Đã thanh toán (hoặc COD) + đã trừ kho THẬT (nhận được stock.deducted), chờ shop xử lý
 PROCESSING  — Shop đang đóng gói
 SHIPPING    — Đang giao (Shipping Service cập nhật)
 DELIVERED   — Đã giao tới nơi
@@ -343,6 +335,8 @@ REFUNDED    — Đã hoàn tiền xong
 
 **Quy tắc chuyển trạng thái:** Chỉ cho phép chuyển theo đúng chiều mũi tên. Mọi chuyển trạng thái sai phải bị từ chối (validate trong Service).
 
+**COD & thu tiền khi giao hàng:** Khi order chuyển sang `DELIVERED` với `paymentMethod = COD`, Order Service gọi REST nội bộ `PATCH /internal/payments/{paymentId}/confirm-cod` bên Payment Service để đánh dấu đã thu tiền (chỉ phục vụ đối soát/lịch sử, không ảnh hưởng đến saga vì đơn COD đã `CONFIRMED` từ trước khi giao).
+
 ---
 
 ## 6. ERROR CODES
@@ -353,7 +347,6 @@ REFUNDED    — Đã hoàn tiền xong
 | `ORDER_NOT_FOUND` | 404 | Order không tồn tại |
 | `ORDER_CANNOT_CANCEL` | 409 | Đơn không ở trạng thái hủy được |
 | `INVALID_STATUS_TRANSITION` | 400 | Chuyển trạng thái sai |
-| `PAYMENT_VERIFICATION_FAILED` | 400 | Sai chữ ký webhook |
 | `ORDER_ACCESS_DENIED` | 403 | Order không thuộc về user này |
 
 ---
@@ -366,8 +359,6 @@ REFUNDED    — Đã hoàn tiền xong
 | GET | /orders | ✅ | USER |
 | GET | /orders/{orderId} | ✅ | USER |
 | POST | /orders/{orderId}/cancel | ✅ | USER |
-| GET | /orders/payment/vnpay/callback | ❌ | — |
-| POST | /orders/payment/vnpay/ipn | ❌ | — |
 | GET | /internal/orders/{orderId} | 🔒 Internal | — |
 | GET | /admin/orders | ✅ | ADMIN |
 | PATCH | /admin/orders/{orderId}/status | ✅ | ADMIN |
@@ -394,7 +385,7 @@ REFUNDED    — Đã hoàn tiền xong
 | total_amount | BIGINT | NOT NULL | subtotal - discount + shipping |
 | coupon_code | VARCHAR(50) | NULLABLE | |
 | payment_method | VARCHAR(20) | NOT NULL | VNPAY / MOMO / COD |
-| payment_status | VARCHAR(20) | NOT NULL, DEFAULT 'UNPAID' | UNPAID / PAID / REFUNDED |
+| payment_status | VARCHAR(20) | NOT NULL, DEFAULT 'UNPAID' | UNPAID / PAID / FAILED / REFUNDING / REFUNDED — map từ `payments.status` bên Payment Service (SUCCESS→PAID) |
 | transaction_id | VARCHAR(100) | NULLABLE | Mã giao dịch từ cổng thanh toán |
 | note | TEXT | NULLABLE | |
 | created_at | TIMESTAMP | NOT NULL, DEFAULT NOW() | |
@@ -525,13 +516,15 @@ CREATE INDEX idx_saga_state_status ON saga_state(saga_status);
 
 ## Bảng mapping Forward ↔ Compensating
 
-| Bước Forward | Action | Compensating Action | Event publish |
+| Bước Forward | Action | Compensating Action | Cách trigger compensating |
 |---|---|---|---|
-| 1. Create order | INSERT order PENDING | UPDATE status = CANCELLED | `order.created` |
-| 2. Reserve stock | reservedQty += qty | reservedQty -= qty (release) | `stock.reserved` |
-| 3. Charge payment | Trừ tiền qua cổng TT | Refund tiền | `payment.processed` |
-| 4. Deduct stock | stockQty -= qty | Cộng lại stockQty (hiếm khi cần) | — |
-| 5. Confirm order | status = CONFIRMED | — (không cần undo) | `order.confirmed` |
+| 1. Create order | INSERT order PENDING | UPDATE status = CANCELLED | — |
+| 2. Reserve stock | reservedQty += qty | reservedQty -= qty (release) | Consume `stock.insufficient` / xử lý trong `order.cancelled` |
+| 3. Charge payment | Trừ tiền qua cổng TT | Refund tiền | Gọi REST đồng bộ `POST /payments/{paymentId}/refund` — **KHÔNG** qua Kafka |
+| 4. Deduct stock | stockQty -= qty | Cộng lại stockQty | Consume `stock.deduct_failed` / xử lý trong `order.cancelled` |
+| 5. Confirm order | status = CONFIRMED (chỉ sau khi có `stock.deducted`) | — (không cần undo) | — |
+
+> **Vì sao refund là REST chứ không phải event:** Payment Service là chủ sở hữu duy nhất của trạng thái thanh toán (bảng `payments`, `refunds`). Order Service chủ động gọi refund ngay khi biết cần compensate, thay vì publish `order.cancelled` rồi để Payment Service tự suy luận có cần refund hay không — tránh 2 nguồn quyết định logic refund.
 
 ---
 
@@ -540,29 +533,49 @@ CREATE INDEX idx_saga_state_status ON saga_state(saga_status);
 ```
 Consume: stock.reserved
   → completed_steps += "STOCK_RESERVED"
-  → Nếu paymentMethod = COD → gọi deduct luôn, confirm order
-  → Nếu online → đã có paymentUrl từ trước, chờ payment.processed
+  → Nếu paymentMethod = COD:
+      → publish order.paid ngay (COD chưa thu tiền lúc này, không chờ payment.processed)
+      → chờ stock.deducted để chuyển CONFIRMED (giống luồng online)
+  → Nếu online (VNPAY/MOMO):
+      → paymentUrl đã có sẵn từ bước tạo order (REST đồng bộ), chờ payment.processed
 
 Consume: stock.insufficient (hết hàng khi reserve)
   → saga_status = COMPENSATING
   → UPDATE order status = CANCELLED (reason OUT_OF_STOCK)
-  → publish order.cancelled (nhưng stock chưa reserve nên không cần release)
+  → publish order.cancelled (needReleaseStock = false, chưa reserve nên không cần release)
 
 Consume: payment.processed (SUCCESS)
   → completed_steps += "PAYMENT_PROCESSED"
+  → UPDATE order payment_status = PAID, transaction_id = payload.transactionId
+     (order.status VẪN GIỮ NGUYÊN — chưa chuyển CONFIRMED, còn chờ trừ kho thật)
   → publish order.paid → Inventory deduct stock thật
-  → UPDATE order status = CONFIRMED, payment_status = PAID
 
 Consume: payment.processed (FAILED)
   → saga_status = COMPENSATING
-  → publish order.cancelled với reason PAYMENT_FAILED
-  → Inventory consume → release stock (vì completed_steps có STOCK_RESERVED)
+  → publish order.cancelled (reason PAYMENT_FAILED, needReleaseStock = có STOCK_RESERVED trong completed_steps)
   → UPDATE order status = CANCELLED
+
+Consume: stock.deducted (Inventory xác nhận trừ kho thật thành công)
+  → completed_steps += "STOCK_DEDUCTED"
+  → UPDATE order status = CONFIRMED
+  → saga_status = COMPLETED
+  → publish order.confirmed → Shipping tạo vận đơn, Notification gửi email
+
+Consume: stock.deduct_failed (hiếm — đã reserve được nhưng lúc trừ thật lại fail)
+  → saga_status = COMPENSATING
+  → UPDATE order status = REFUNDING (nếu có PAYMENT_PROCESSED) hoặc CANCELLED (nếu COD chưa cần refund)
+  → Nếu completed_steps có PAYMENT_PROCESSED → gọi REST đồng bộ POST /payments/{paymentId}/refund
+  → publish order.cancelled (reason STOCK_DEDUCT_FAILED, needReleaseStock = true)
 
 Consume: stock.released (compensating done)
   → completed_steps -= "STOCK_RESERVED"
   → saga_status = COMPENSATED
   → publish notification "Đặt hàng thất bại"
+
+Consume: payment.refunded (Payment Service xác nhận hoàn tiền xong)
+  → UPDATE order status = REFUNDED, payment_status = REFUNDED
+  → saga_status = COMPENSATED
+  → publish notification "Đã hoàn tiền"
 ```
 
 ---
@@ -592,11 +605,12 @@ Compensating cần làm (ngược thứ tự):
 ### Case 3 — User hủy sau khi đã thanh toán
 ```
 ORDER_CREATED → STOCK_RESERVED → PAYMENT_PROCESSED → STOCK_DEDUCTED → CONFIRMED
-                                                      → [user cancel]
+                                                                        → [user cancel]
 Compensating cần làm:
-  • Refund tiền (vì đã PAYMENT_PROCESSED)
-  • Cộng lại stock (vì đã STOCK_DEDUCTED)
-  • Order → REFUNDING → REFUNDED
+  • Order → REFUNDING (ngay khi nhận request cancel)
+  • Gọi REST đồng bộ POST /payments/{paymentId}/refund (vì completed_steps có PAYMENT_PROCESSED)
+  • Publish order.cancelled (needReleaseStock = true vì đã STOCK_DEDUCTED) → Inventory cộng lại stock
+  • Chờ Payment Service publish payment.refunded → Order → REFUNDED
   • Gửi email "Đã hủy đơn, hoàn tiền trong 3-5 ngày"
 ```
 
@@ -669,7 +683,30 @@ Giải pháp: Scheduled Job quét saga_state
 }
 ```
 **Kafka key:** `orderId`
-**Consumers:** Inventory Service (reserve stock), Payment Service (chuẩn bị charge)
+**Consumers:** Inventory Service (reserve stock)
+
+> Payment Service **không** consume event này — payment record được tạo trước đó bằng REST đồng bộ `POST /payments/create` (xem flow `POST /orders` ở PHẦN 1), ngay trước khi publish `order.created`.
+
+---
+
+### order.paid
+```json
+{
+  "eventId":   "uuid-v4",
+  "eventType": "order.paid",
+  "timestamp": "2024-01-15T10:35:00Z",
+  "version":   "1.0",
+  "payload": {
+    "orderId":   "order-uuid-1",
+    "orderCode": "SN240115001",
+    "items": [
+      { "variantId": "var-uuid-1", "qty": 2 }
+    ]
+  }
+}
+```
+**Kafka key:** `orderId`
+**Consumers:** Inventory Service (trừ kho thật — publish lại `stock.deducted` hoặc `stock.deduct_failed`)
 
 ---
 
@@ -684,14 +721,15 @@ Giải pháp: Scheduled Job quét saga_state
     "orderId":         "order-uuid-1",
     "reason":          "PAYMENT_FAILED",
     "needReleaseStock": true,
-    "needRefund":       false,
     "items": [
       { "variantId": "var-uuid-1", "qty": 2 }
     ]
   }
 }
 ```
-**Consumers:** Inventory Service (release stock), Payment Service (refund nếu needRefund), Notification Service (gửi email)
+**Consumers:** Inventory Service (release/cộng lại stock theo `needReleaseStock`), Notification Service (gửi email)
+
+> Không còn field `needRefund` — refund (nếu cần) đã được Order Service gọi REST đồng bộ tới Payment Service **trước khi** publish event này, không phải do Payment Service consume event để tự quyết định.
 
 ---
 
