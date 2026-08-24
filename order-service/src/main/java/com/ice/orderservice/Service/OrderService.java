@@ -9,6 +9,8 @@ import com.ice.orderservice.DTO.Request.Order.CreatedOrderRequest;
 import com.ice.orderservice.DTO.Response.Cart.CartCheckoutTokenResponse;
 import com.ice.orderservice.DTO.Response.Cart.CartItemDataCheckoutTokenResponse;
 import com.ice.orderservice.DTO.Response.Order.CreatedOrderResponse;
+import com.ice.orderservice.DTO.Response.Order.OrderPageResponse;
+import com.ice.orderservice.DTO.Response.Order.OrderResponse;
 import com.ice.orderservice.DTO.Response.User.AddressResponse;
 import com.ice.orderservice.Entity.*;
 import com.ice.orderservice.Enum.CurrentStep;
@@ -18,10 +20,16 @@ import com.ice.orderservice.Exception.OrderAccessDeniedException;
 import com.ice.orderservice.Repository.OrderRepo;
 import com.ice.orderservice.Repository.OrderShippingAddressRepo;
 import com.ice.orderservice.Repository.SageStateRepo;
+import com.ice.orderservice.Specification.OrderSpecification;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDate;
+import java.time.LocalTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
@@ -156,5 +164,29 @@ public class OrderService {
 
     private String generateOrderCode() {
         return "ORD" + System.currentTimeMillis();
+    }
+
+    public OrderPageResponse getOrders(int page, int size, OrderStatus status, LocalDate startDate, LocalDate endDate, String userId) {
+
+        Specification<Order> orderSpecification = Specification
+                .where(OrderSpecification.hasStatus(status))
+                .and(OrderSpecification.hasUserId(UUID.fromString(userId)))
+                .and(OrderSpecification.betweenDays(
+                        startDate == null ? null : startDate.atStartOfDay(),
+                        endDate == null ? null : endDate.atTime(LocalTime.MAX)
+                ));
+
+        Page<Order> pageOrder = orderRepo.findAll(orderSpecification, PageRequest.of(page, size));
+
+        List<OrderResponse> orderResponses = pageOrder.getContent().stream()
+                .map(OrderResponse::from)
+                .toList();
+
+        return new OrderPageResponse(
+                orderResponses,
+                page,
+                pageOrder.getTotalElements(),
+                pageOrder.getTotalPages()
+        );
     }
 }
