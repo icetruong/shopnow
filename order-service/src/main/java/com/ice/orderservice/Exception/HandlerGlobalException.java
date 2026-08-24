@@ -58,4 +58,11 @@ public class HandlerGlobalException {
         return ResponseEntity.status(HttpStatus.FORBIDDEN)
                 .body(ApiResponse.fail(ex.getMessage(), ErrorCode.ORDER_ACCESS_DENIED.toString()));
     }
+
+    @ExceptionHandler(OrderCannotCancelException.class)
+    public ResponseEntity<ApiResponse<Void>> handleOrderCannotCancel(OrderCannotCancelException ex)
+    {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(ApiResponse.fail(ex.getMessage(), ErrorCode.ORDER_CANNOT_CANCEL.toString()));
+    }
 }

@@ -2,31 +2,28 @@ package com.ice.orderservice.Service;
 
 import com.ice.orderservice.Client.CartClient;
 import com.ice.orderservice.Client.UserClient;
+import com.ice.orderservice.DTO.Event.OrderCancelledPayload;
 import com.ice.orderservice.DTO.Event.OrderCreatedPayload;
 import com.ice.orderservice.DTO.Event.OrderItemEvent;
 import com.ice.orderservice.DTO.Event.ShippingAddressEvent;
+import com.ice.orderservice.DTO.Request.Order.CancelledOrderRequest;
 import com.ice.orderservice.DTO.Request.Order.CreatedOrderRequest;
 import com.ice.orderservice.DTO.Response.Cart.CartCheckoutTokenResponse;
 import com.ice.orderservice.DTO.Response.Cart.CartItemDataCheckoutTokenResponse;
-import com.ice.orderservice.DTO.Response.Order.CreatedOrderResponse;
-import com.ice.orderservice.DTO.Response.Order.OrderDetailResponse;
-import com.ice.orderservice.DTO.Response.Order.OrderItemDetailResponse;
-import com.ice.orderservice.DTO.Response.Order.OrderPageResponse;
-import com.ice.orderservice.DTO.Response.Order.OrderPricingResponse;
-import com.ice.orderservice.DTO.Response.Order.OrderResponse;
-import com.ice.orderservice.DTO.Response.Order.OrderShippingAddressResponse;
-import com.ice.orderservice.DTO.Response.Order.OrderTimelineResponse;
+import com.ice.orderservice.DTO.Response.Order.*;
 import com.ice.orderservice.DTO.Response.User.AddressResponse;
 import com.ice.orderservice.Entity.*;
 import com.ice.orderservice.Enum.CurrentStep;
 import com.ice.orderservice.Enum.OrderStatus;
 import com.ice.orderservice.Enum.SagaStatus;
 import com.ice.orderservice.Exception.OrderAccessDeniedException;
+import com.ice.orderservice.Exception.OrderCannotCancelException;
 import com.ice.orderservice.Exception.ResourceNotFoundException;
 import com.ice.orderservice.Repository.OrderRepo;
 import com.ice.orderservice.Repository.OrderShippingAddressRepo;
 import com.ice.orderservice.Repository.SageStateRepo;
 import com.ice.orderservice.Specification.OrderSpecification;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -259,6 +256,67 @@ public class OrderService {
                 order.getNote(),
                 timeline,
                 order.getCreatedAt().toInstant(ZoneOffset.UTC)
+        );
+    }
+
+    @Transactional
+    public CancelledOrderResponse cancelledOrder(CancelledOrderRequest request, String orderId, String userId) {
+        Order order = orderRepo.findById(UUID.fromString(orderId))
+                .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy đơn hàng"));
+
+        if (!order.getUserId().equals(UUID.fromString(userId))) {
+            throw new OrderAccessDeniedException("Đơn hàng không thuộc về bạn");
+        }
+
+        if(order.getStatus() != OrderStatus.CONFIRMED && order.getStatus() != OrderStatus.PENDING)
+        {
+            throw new OrderCannotCancelException("Trạng thái đơn hàng không thể hủy");
+        }
+
+        SagaState sagaState = sageStateRepo.findByOrderId(UUID.fromString(orderId))
+                .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy Sage State của đơn hàng"));
+
+        OrderStatus oldStatus = order.getStatus();
+
+        if (sagaState.getCompletedSteps().contains(CurrentStep.PAYMENT_PROCESSED.name()))
+        {
+            order.setStatus(OrderStatus.REFUNDING);
+            // TODO: gọi paymentClient.refund(paymentId, amount, reason) khi PaymentClient sẵn sàng
+            // REFUNDING -> REFUNDED sẽ do 1 @KafkaListener riêng lắng nghe event "payment.refunded" xử lý, không phải ở đây
+        }
+        else
+        {
+            order.setStatus(OrderStatus.CANCELLED);
+        }
+
+        OrderStatusHistory history = OrderStatusHistory.builder()
+                .order(order)
+                .fromStatus(oldStatus)
+                .toStatus(order.getStatus())
+                .note(request.getReason())
+                .changedBy(userId)
+                .build();
+        order.getOrderStatusHistories().add(history);
+
+        Order savedOrder = orderRepo.save(order);
+
+        boolean needReleaseStock = sagaState.getCompletedSteps().contains(CurrentStep.STOCK_RESERVED.name())
+                || sagaState.getCompletedSteps().contains(CurrentStep.STOCK_DEDUCTED.name());
+
+        List<OrderItemEvent> items = order.getOrderItems().stream()
+                .map(orderItem -> new OrderItemEvent(orderItem.getVariantId().toString(), orderItem.getQty()))
+                .toList();
+
+        kafkaProducerService.publishOrderCancelledEvent(new OrderCancelledPayload(
+                orderId,
+                request.getReason(),
+                needReleaseStock,
+                items
+        ));
+
+        return new CancelledOrderResponse(
+                orderId,
+                savedOrder.getStatus().name()
         );
     }
 }

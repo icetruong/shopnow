@@ -1,7 +1,9 @@
 package com.ice.orderservice.Controller;
 
+import com.ice.orderservice.DTO.Request.Order.CancelledOrderRequest;
 import com.ice.orderservice.DTO.Request.Order.CreatedOrderRequest;
 import com.ice.orderservice.DTO.Response.Common.ApiResponse;
+import com.ice.orderservice.DTO.Response.Order.CancelledOrderResponse;
 import com.ice.orderservice.DTO.Response.Order.CreatedOrderResponse;
 import com.ice.orderservice.DTO.Response.Order.OrderDetailResponse;
 import com.ice.orderservice.DTO.Response.Order.OrderPageResponse;
@@ -63,6 +65,17 @@ public class OrderController {
         return ResponseEntity.ok(ApiResponse.success(
                 "Lấy chi tiết đơn hàng thành công",
                 orderService.getOrderDetail(orderId, userId)
+        ));
+    }
+
+    @PostMapping("/{orderId}/cancel")
+    public ResponseEntity<ApiResponse<CancelledOrderResponse>> cancelledOrder(@Valid @RequestBody CancelledOrderRequest request,@PathVariable String orderId, Authentication authentication)
+    {
+        Jwt jwt = (Jwt) authentication.getPrincipal();
+        String userId = jwt.getClaimAsString("userId");
+        return ResponseEntity.ok(ApiResponse.success(
+                "Đã hủy đơn hàng. Tiền sẽ được hoàn trong 3-5 ngày",
+                orderService.cancelledOrder(request, orderId, userId)
         ));
     }
 }
