@@ -6,6 +6,7 @@ import com.ice.orderservice.DTO.Event.OrderCancelledPayload;
 import com.ice.orderservice.DTO.Event.OrderCreatedPayload;
 import com.ice.orderservice.DTO.Event.OrderItemEvent;
 import com.ice.orderservice.DTO.Event.ShippingAddressEvent;
+import com.ice.orderservice.DTO.Request.Order.AdminUpdateStatusOrderRequest;
 import com.ice.orderservice.DTO.Request.Order.CancelledOrderRequest;
 import com.ice.orderservice.DTO.Request.Order.CreatedOrderRequest;
 import com.ice.orderservice.DTO.Response.Cart.CartCheckoutTokenResponse;
@@ -15,7 +16,9 @@ import com.ice.orderservice.DTO.Response.User.AddressResponse;
 import com.ice.orderservice.Entity.*;
 import com.ice.orderservice.Enum.CurrentStep;
 import com.ice.orderservice.Enum.OrderStatus;
+import com.ice.orderservice.Enum.PaymentStatus;
 import com.ice.orderservice.Enum.SagaStatus;
+import com.ice.orderservice.Exception.InvalidStatusTransitionException;
 import com.ice.orderservice.Exception.OrderAccessDeniedException;
 import com.ice.orderservice.Exception.OrderCannotCancelException;
 import com.ice.orderservice.Exception.ResourceNotFoundException;
@@ -37,6 +40,8 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 @Service
@@ -49,6 +54,14 @@ public class OrderService {
     private final CartClient cartClient;
     private final UserClient userClient;
     private final KafkaProducerService kafkaProducerService;
+
+    private static final Map<OrderStatus, Set<OrderStatus>> ALLOWED_STATUS_TRANSITIONS = Map.of(
+            OrderStatus.PENDING, Set.of(OrderStatus.CONFIRMED, OrderStatus.CANCELLED),
+            OrderStatus.CONFIRMED, Set.of(OrderStatus.PROCESSING, OrderStatus.CANCELLED),
+            OrderStatus.PROCESSING, Set.of(OrderStatus.SHIPPING),
+            OrderStatus.SHIPPING, Set.of(OrderStatus.DELIVERED),
+            OrderStatus.DELIVERED, Set.of(OrderStatus.COMPLETED)
+    );
 
     @Transactional
     public CreatedOrderResponse createOrder(CreatedOrderRequest request, String userId) {
@@ -202,61 +215,7 @@ public class OrderService {
             throw new OrderAccessDeniedException("Đơn hàng không thuộc về bạn");
         }
 
-        OrderShippingAddress shippingAddress = orderShippingAddressRepo.findByOrderId(order.getId())
-                .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy địa chỉ giao hàng"));
-
-        List<OrderItemDetailResponse> items = order.getOrderItems().stream()
-                .map(item -> new OrderItemDetailResponse(
-                        item.getVariantId().toString(),
-                        item.getProductName(),
-                        item.getSku(),
-                        item.getColor(),
-                        item.getSize(),
-                        item.getThumbnail(),
-                        item.getUnitPrice(),
-                        item.getQty(),
-                        item.getSubtotal()
-                ))
-                .toList();
-
-        OrderShippingAddressResponse shippingAddressResponse = new OrderShippingAddressResponse(
-                shippingAddress.getFullName(),
-                shippingAddress.getPhone(),
-                shippingAddress.getProvince(),
-                shippingAddress.getDistrict(),
-                shippingAddress.getWard(),
-                shippingAddress.getStreetDetail()
-        );
-
-        OrderPricingResponse pricing = new OrderPricingResponse(
-                order.getSubtotal(),
-                order.getDiscountAmount(),
-                order.getShippingFee(),
-                order.getTotalAmount()
-        );
-
-        List<OrderTimelineResponse> timeline = order.getOrderStatusHistories().stream()
-                .sorted(Comparator.comparing(OrderStatusHistory::getCreatedAt))
-                .map(history -> new OrderTimelineResponse(
-                        history.getToStatus().name(),
-                        history.getCreatedAt().toInstant(ZoneOffset.UTC)
-                ))
-                .toList();
-
-        return new OrderDetailResponse(
-                order.getId().toString(),
-                order.getOrderCode(),
-                order.getStatus().name(),
-                items,
-                shippingAddressResponse,
-                pricing,
-                order.getCouponCode(),
-                order.getPaymentMethod().name(),
-                order.getPaymentStatus().name(),
-                order.getNote(),
-                timeline,
-                order.getCreatedAt().toInstant(ZoneOffset.UTC)
-        );
+        return buildOrderDetailResponse(order);
     }
 
     @Transactional
@@ -318,5 +277,123 @@ public class OrderService {
                 orderId,
                 savedOrder.getStatus().name()
         );
+    }
+
+    public OrderDetailResponse getOrderDetailInternal(String orderId) {
+        Order order = orderRepo.findById(UUID.fromString(orderId))
+                .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy đơn hàng"));
+
+        return buildOrderDetailResponse(order);
+    }
+
+    private OrderDetailResponse buildOrderDetailResponse(Order order) {
+        OrderShippingAddress shippingAddress = orderShippingAddressRepo.findByOrderId(order.getId())
+                .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy địa chỉ giao hàng"));
+
+        List<OrderItemDetailResponse> items = order.getOrderItems().stream()
+                .map(item -> new OrderItemDetailResponse(
+                        item.getVariantId().toString(),
+                        item.getProductName(),
+                        item.getSku(),
+                        item.getColor(),
+                        item.getSize(),
+                        item.getThumbnail(),
+                        item.getUnitPrice(),
+                        item.getQty(),
+                        item.getSubtotal()
+                ))
+                .toList();
+
+        OrderShippingAddressResponse shippingAddressResponse = new OrderShippingAddressResponse(
+                shippingAddress.getFullName(),
+                shippingAddress.getPhone(),
+                shippingAddress.getProvince(),
+                shippingAddress.getDistrict(),
+                shippingAddress.getWard(),
+                shippingAddress.getStreetDetail()
+        );
+
+        OrderPricingResponse pricing = new OrderPricingResponse(
+                order.getSubtotal(),
+                order.getDiscountAmount(),
+                order.getShippingFee(),
+                order.getTotalAmount()
+        );
+
+        List<OrderTimelineResponse> timeline = order.getOrderStatusHistories().stream()
+                .sorted(Comparator.comparing(OrderStatusHistory::getCreatedAt))
+                .map(history -> new OrderTimelineResponse(
+                        history.getToStatus().name(),
+                        history.getCreatedAt().toInstant(ZoneOffset.UTC)
+                ))
+                .toList();
+
+        return new OrderDetailResponse(
+                order.getId().toString(),
+                order.getOrderCode(),
+                order.getStatus().name(),
+                items,
+                shippingAddressResponse,
+                pricing,
+                order.getCouponCode(),
+                order.getPaymentMethod().name(),
+                order.getPaymentStatus().name(),
+                order.getNote(),
+                timeline,
+                order.getCreatedAt().toInstant(ZoneOffset.UTC)
+        );
+    }
+
+    public AdminOrderPageResponse getOrderPageAdmin(int page, int size, OrderStatus status, PaymentStatus paymentStatus, String keyword, String userId, LocalDate startDate, LocalDate endDate) {
+        Specification<Order> orderSpecification = Specification
+                .where(OrderSpecification.hasStatus(status))
+                .and(OrderSpecification.hasPaymentStatus(paymentStatus))
+                .and(OrderSpecification.hasKeyword(keyword))
+                .and(OrderSpecification.hasUserId(userId == null ? null : UUID.fromString(userId)))
+                .and(OrderSpecification.betweenDays(
+                        startDate == null ? null : startDate.atStartOfDay(),
+                        endDate == null ? null : endDate.atTime(LocalTime.MAX)
+                ));
+
+        Page<Order> pageOrder = orderRepo.findAll(orderSpecification, PageRequest.of(page, size));
+
+        List<AdminOrderResponse> adminOrderResponses = pageOrder.getContent().stream()
+                .map(AdminOrderResponse::from)
+                .toList();
+
+        return new AdminOrderPageResponse(
+                adminOrderResponses,
+                page,
+                pageOrder.getTotalElements(),
+                pageOrder.getTotalPages()
+        );
+    }
+
+    public void updateStatusOrder(AdminUpdateStatusOrderRequest request, String orderId, String userId) {
+        Order order = orderRepo.findById(UUID.fromString(orderId))
+                .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy đơn hàng"));
+
+        OrderStatus oldStatus = order.getStatus();
+        OrderStatus newStatus = request.getStatus();
+
+        Set<OrderStatus> allowedNextStatuses = ALLOWED_STATUS_TRANSITIONS.getOrDefault(oldStatus, Set.of());
+        if (!allowedNextStatuses.contains(newStatus)) {
+            throw new InvalidStatusTransitionException(
+                    "Không thể chuyển trạng thái từ " + oldStatus + " sang " + newStatus
+            );
+        }
+
+        order.setStatus(newStatus);
+
+        OrderStatusHistory history = OrderStatusHistory.builder()
+                .order(order)
+                .fromStatus(oldStatus)
+                .toStatus(order.getStatus())
+                .note(request.getNote())
+                .changedBy(userId)
+                .build();
+        order.getOrderStatusHistories().add(history);
+
+        orderRepo.save(order);
     }
 }

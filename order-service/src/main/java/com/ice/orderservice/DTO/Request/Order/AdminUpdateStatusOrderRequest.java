@@ -12,7 +12,7 @@ import lombok.Setter;
 @Setter
 @AllArgsConstructor
 @NoArgsConstructor
-public class AdminUpdateStatusOrder {
+public class AdminUpdateStatusOrderRequest {
     @NotNull(message = "status must be not null")
     private OrderStatus status;
 

@@ -65,4 +65,11 @@ public class HandlerGlobalException {
         return ResponseEntity.status(HttpStatus.CONFLICT)
                 .body(ApiResponse.fail(ex.getMessage(), ErrorCode.ORDER_CANNOT_CANCEL.toString()));
     }
+
+    @ExceptionHandler(InvalidStatusTransitionException.class)
+    public ResponseEntity<ApiResponse<Void>> handleInvalidStatusTransition(InvalidStatusTransitionException ex)
+    {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(ApiResponse.fail(ex.getMessage(), ErrorCode.INVALID_STATUS_TRANSITION.toString()));
+    }
 }

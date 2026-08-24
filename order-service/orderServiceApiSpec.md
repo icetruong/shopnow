@@ -287,7 +287,39 @@ startDate    = 2024-01-01
 endDate      = 2024-01-31
 ```
 
-**Response 200:** Page danh sách order.
+**Response 200**
+```json
+{
+  "success": true,
+  "message": "Lấy danh sách đơn hàng thành công",
+  "data": {
+    "content": [
+      {
+        "orderId":       "order-uuid-1",
+        "orderCode":     "SN240115001",
+        "userId":        "user-uuid-1",
+        "status":        "CONFIRMED",
+        "paymentStatus": "PAID",
+        "totalAmount":   448200,
+        "itemCount":     2,
+        "thumbnail":     "https://storage.shopnow.com/products/ao-polo/thumb.jpg",
+        "firstItemName": "Áo Polo Nam Basic",
+        "paymentMethod": "VNPAY",
+        "createdAt":     "2024-01-15T10:30:00Z"
+      }
+    ],
+    "page":          0,
+    "totalElements": 8,
+    "totalPages":    1
+  }
+}
+```
+
+So với `GET /orders` (dành cho user), item ở đây có thêm 2 field: `userId` (biết đơn của khách nào — user tự xem đơn mình thì không cần) và `paymentStatus` (để filter `paymentStatus` ở query param thấy ngay trên list, không cần bấm vào từng đơn).
+
+**Khác biệt về scope so với `GET /orders`:**
+- Không giới hạn theo `userId` của người gọi (admin xem được đơn của mọi khách hàng).
+- `userId` trong query param là filter **tùy chọn** — để trống thì trả tất cả, điền vào thì lọc riêng 1 khách.
 
 ---
 
