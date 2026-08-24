@@ -9,14 +9,20 @@ import com.ice.orderservice.DTO.Request.Order.CreatedOrderRequest;
 import com.ice.orderservice.DTO.Response.Cart.CartCheckoutTokenResponse;
 import com.ice.orderservice.DTO.Response.Cart.CartItemDataCheckoutTokenResponse;
 import com.ice.orderservice.DTO.Response.Order.CreatedOrderResponse;
+import com.ice.orderservice.DTO.Response.Order.OrderDetailResponse;
+import com.ice.orderservice.DTO.Response.Order.OrderItemDetailResponse;
 import com.ice.orderservice.DTO.Response.Order.OrderPageResponse;
+import com.ice.orderservice.DTO.Response.Order.OrderPricingResponse;
 import com.ice.orderservice.DTO.Response.Order.OrderResponse;
+import com.ice.orderservice.DTO.Response.Order.OrderShippingAddressResponse;
+import com.ice.orderservice.DTO.Response.Order.OrderTimelineResponse;
 import com.ice.orderservice.DTO.Response.User.AddressResponse;
 import com.ice.orderservice.Entity.*;
 import com.ice.orderservice.Enum.CurrentStep;
 import com.ice.orderservice.Enum.OrderStatus;
 import com.ice.orderservice.Enum.SagaStatus;
 import com.ice.orderservice.Exception.OrderAccessDeniedException;
+import com.ice.orderservice.Exception.ResourceNotFoundException;
 import com.ice.orderservice.Repository.OrderRepo;
 import com.ice.orderservice.Repository.OrderShippingAddressRepo;
 import com.ice.orderservice.Repository.SageStateRepo;
@@ -32,6 +38,7 @@ import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
 
@@ -187,6 +194,71 @@ public class OrderService {
                 page,
                 pageOrder.getTotalElements(),
                 pageOrder.getTotalPages()
+        );
+    }
+
+    public OrderDetailResponse getOrderDetail(String orderId, String userId) {
+        Order order = orderRepo.findById(UUID.fromString(orderId))
+                .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy đơn hàng"));
+
+        if (!order.getUserId().equals(UUID.fromString(userId))) {
+            throw new OrderAccessDeniedException("Đơn hàng không thuộc về bạn");
+        }
+
+        OrderShippingAddress shippingAddress = orderShippingAddressRepo.findByOrderId(order.getId())
+                .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy địa chỉ giao hàng"));
+
+        List<OrderItemDetailResponse> items = order.getOrderItems().stream()
+                .map(item -> new OrderItemDetailResponse(
+                        item.getVariantId().toString(),
+                        item.getProductName(),
+                        item.getSku(),
+                        item.getColor(),
+                        item.getSize(),
+                        item.getThumbnail(),
+                        item.getUnitPrice(),
+                        item.getQty(),
+                        item.getSubtotal()
+                ))
+                .toList();
+
+        OrderShippingAddressResponse shippingAddressResponse = new OrderShippingAddressResponse(
+                shippingAddress.getFullName(),
+                shippingAddress.getPhone(),
+                shippingAddress.getProvince(),
+                shippingAddress.getDistrict(),
+                shippingAddress.getWard(),
+                shippingAddress.getStreetDetail()
+        );
+
+        OrderPricingResponse pricing = new OrderPricingResponse(
+                order.getSubtotal(),
+                order.getDiscountAmount(),
+                order.getShippingFee(),
+                order.getTotalAmount()
+        );
+
+        List<OrderTimelineResponse> timeline = order.getOrderStatusHistories().stream()
+                .sorted(Comparator.comparing(OrderStatusHistory::getCreatedAt))
+                .map(history -> new OrderTimelineResponse(
+                        history.getToStatus().name(),
+                        history.getCreatedAt().toInstant(ZoneOffset.UTC)
+                ))
+                .toList();
+
+        return new OrderDetailResponse(
+                order.getId().toString(),
+                order.getOrderCode(),
+                order.getStatus().name(),
+                items,
+                shippingAddressResponse,
+                pricing,
+                order.getCouponCode(),
+                order.getPaymentMethod().name(),
+                order.getPaymentStatus().name(),
+                order.getNote(),
+                timeline,
+                order.getCreatedAt().toInstant(ZoneOffset.UTC)
         );
     }
 }

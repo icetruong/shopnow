@@ -3,6 +3,7 @@ package com.ice.orderservice.Controller;
 import com.ice.orderservice.DTO.Request.Order.CreatedOrderRequest;
 import com.ice.orderservice.DTO.Response.Common.ApiResponse;
 import com.ice.orderservice.DTO.Response.Order.CreatedOrderResponse;
+import com.ice.orderservice.DTO.Response.Order.OrderDetailResponse;
 import com.ice.orderservice.DTO.Response.Order.OrderPageResponse;
 import com.ice.orderservice.Enum.OrderStatus;
 import com.ice.orderservice.Service.OrderService;
@@ -51,6 +52,17 @@ public class OrderController {
         return ResponseEntity.ok(ApiResponse.success(
                 "Lấy danh sách đơn hàng thành công",
                 orderService.getOrders(page, size, status, startDate, endDate, userId)
+        ));
+    }
+
+    @GetMapping("/{orderId}")
+    public ResponseEntity<ApiResponse<OrderDetailResponse>> getOrderDetail(@PathVariable String orderId, Authentication authentication)
+    {
+        Jwt jwt = (Jwt) authentication.getPrincipal();
+        String userId = jwt.getClaimAsString("userId");
+        return ResponseEntity.ok(ApiResponse.success(
+                "Lấy chi tiết đơn hàng thành công",
+                orderService.getOrderDetail(orderId, userId)
         ));
     }
 }
