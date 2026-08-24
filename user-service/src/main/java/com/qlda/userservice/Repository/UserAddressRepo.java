@@ -10,6 +10,7 @@ import java.util.UUID;
 public interface UserAddressRepo extends JpaRepository<UserAddress, UUID> {
     List<UserAddress> findAllByUser_Email(String email);
     Optional<UserAddress> findByIdAndUser_Email(UUID id,String email);
+    Optional<UserAddress> findByIdAndUser_Id(UUID id, UUID userId);
 
     long deleteByIdAndUser_Email(UUID id, String email);
 

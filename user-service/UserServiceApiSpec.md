@@ -547,7 +547,7 @@ Xóa địa chỉ.
 ---
 
 ### GET /internal/users/{userId}
-Order Service gọi để lấy địa chỉ giao hàng khi tạo đơn.
+Các service khác gọi để lấy thông tin cơ bản của user (tên, email, sđt) — ví dụ Notification Service dùng để gửi email.
 
 **Header:** `X-Internal-Token: {sharedSecret}`
 
@@ -569,7 +569,37 @@ Order Service gọi để lấy địa chỉ giao hàng khi tạo đơn.
 }
 ```
 
-> **Lưu ý:** `defaultAddress` là `null` nếu user chưa có địa chỉ mặc định.
+> **Lưu ý:** `defaultAddress` là `null` nếu user chưa có địa chỉ mặc định. Field này chỉ mang tính tham khảo/hiển thị — **không** dùng để lấy địa chỉ giao hàng khi tạo đơn, vì user có thể chọn giao tới một địa chỉ khác địa chỉ mặc định. Order Service phải dùng `GET /internal/users/{userId}/addresses/{addressId}` bên dưới cho việc đó.
+
+---
+
+### GET /internal/users/{userId}/addresses/{addressId}
+Order Service gọi để lấy đúng địa chỉ giao hàng mà user đã chọn (`addressId` trong request `POST /orders`) khi tạo đơn — không nhất thiết là địa chỉ mặc định.
+
+**Header:** `X-Internal-Token: {sharedSecret}`
+
+**Response 200**
+```json
+{
+  "fullName":     "Nguyen Van A",
+  "phone":        "0901234567",
+  "province":     "TP. Hồ Chí Minh",
+  "district":     "Quận 1",
+  "ward":         "Phường Bến Nghé",
+  "streetDetail": "123 Đường Lê Lợi"
+}
+```
+
+**Response 404** — `addressId` không tồn tại, hoặc tồn tại nhưng không thuộc về `userId` này
+```json
+{
+  "success": false,
+  "code":    "NOT_FOUND",
+  "message": "Address not found"
+}
+```
+
+> **Quan trọng:** Phải kiểm tra `addressId` thuộc đúng `userId` được truyền vào (`WHERE id = :addressId AND user_id = :userId`), không chỉ tìm theo `addressId` — tránh trường hợp lấy nhầm/lộ địa chỉ của user khác nếu `addressId` bị đoán hoặc lộ.
 
 ---
 
@@ -904,6 +934,7 @@ CREATE INDEX idx_addresses_user_id ON user_addresses(user_id);
 | DELETE | /users/me/addresses/{id} | ✅ | USER, ADMIN |
 | PATCH | /users/me/addresses/{id}/default | ✅ | USER, ADMIN |
 | GET | /internal/users/{userId} | 🔒 Internal | — |
+| GET | /internal/users/{userId}/addresses/{addressId} | 🔒 Internal | — |
 | GET | /internal/users/{userId}/exists | 🔒 Internal | — |
 | GET | /api/v1/admin/users | ✅ | ADMIN |
 | GET | /api/v1/admin/users/{userId} | ✅ | ADMIN |

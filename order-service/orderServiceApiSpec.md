@@ -71,8 +71,8 @@ Tạo đơn hàng mới từ checkout token. Đây là điểm khởi đầu c�
 ```
 1. Gọi Cart Service: GET /internal/cart/checkout/{checkoutToken}
    → lấy cart data đã validate
-2. Gọi User Service: GET /internal/users/{userId}
-   → lấy địa chỉ giao hàng
+2. Gọi User Service: GET /internal/users/{userId}/addresses/{addressId}
+   → lấy đúng địa chỉ giao hàng user đã chọn (addressId lấy từ request POST /orders)
 3. BEGIN TRANSACTION (local)
    a. INSERT order (status = PENDING, payment_status = UNPAID)
    b. INSERT order_items (snapshot giá, tên, variant lúc đặt)

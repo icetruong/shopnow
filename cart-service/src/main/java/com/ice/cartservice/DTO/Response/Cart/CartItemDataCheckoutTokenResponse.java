@@ -12,6 +12,10 @@ import lombok.Setter;
 public class CartItemDataCheckoutTokenResponse {
     private String variantId;
     private String productId;
+    private String productName;
+    private String color;
+    private String size;
+    private String thumbnail;
     private String sku;
     private Long unitPrice;
     private Integer qty;

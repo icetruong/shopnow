@@ -1,6 +1,7 @@
 package com.ice.orderservice.Exception;
 
 import com.ice.orderservice.DTO.Response.Common.ApiResponse;
+import com.ice.orderservice.Enum.ErrorCode;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -37,5 +38,24 @@ public class HandlerGlobalException {
 
         return ResponseEntity.badRequest()
                 .body(ApiResponse.fail(message, "INVALID_REQUEST"));
+    }
+
+    @ExceptionHandler(CheckoutTokenExpiredException.class)
+    public ResponseEntity<ApiResponse<Void>> handleCheckoutTokenExpired(CheckoutTokenExpiredException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(ApiResponse.fail(ex.getMessage(), ErrorCode.CHECKOUT_TOKEN_EXPIRED.toString()));
+    }
+
+    @ExceptionHandler(ServiceUnavailableException.class)
+    public ResponseEntity<ApiResponse<Void>> handleServiceUnavailable(ServiceUnavailableException ex) {
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .body(ApiResponse.fail(ex.getMessage(), ErrorCode.SERVICE_UNAVAILABLE.toString()));
+    }
+
+    @ExceptionHandler(OrderAccessDeniedException.class)
+    public ResponseEntity<ApiResponse<Void>> handleOrderAccessDenied(OrderAccessDeniedException ex)
+    {
+        return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                .body(ApiResponse.fail(ex.getMessage(), ErrorCode.ORDER_ACCESS_DENIED.toString()));
     }
 }

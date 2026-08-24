@@ -1,7 +1,9 @@
 package com.qlda.userservice.Controller.Internal;
 
+import com.qlda.userservice.DTO.Response.Address.AddressInternalResponse;
 import com.qlda.userservice.DTO.Response.User.InternalExistUserResponse;
 import com.qlda.userservice.DTO.Response.User.InternalUserResponse;
+import com.qlda.userservice.Service.AddressService;
 import com.qlda.userservice.Service.UserService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -18,11 +20,18 @@ import java.util.UUID;
 public class InternalUserController {
 
     private final UserService userService;
+    private final AddressService addressService;
 
     @GetMapping("/users/{id}")
     public ResponseEntity<InternalUserResponse> getUser(@PathVariable UUID id)
     {
         return ResponseEntity.ok(userService.getUser(id));
+    }
+
+    @GetMapping("/users/{userId}/addresses/{addressId}")
+    public ResponseEntity<AddressInternalResponse> getAddress(@PathVariable UUID userId, @PathVariable UUID addressId)
+    {
+        return ResponseEntity.ok(addressService.getAddressInternal(userId, addressId));
     }
 
     @GetMapping("/users/{id}/exists")

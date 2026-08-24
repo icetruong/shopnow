@@ -417,6 +417,10 @@ public class CartService {
                     .cartItemId(cartItem.getCartItemId())
                     .variantId(cartItem.getVariantId())
                     .productId(productBatchItemResponse.getProductId())
+                    .productName(productBatchItemResponse.getProductName())
+                    .color(productBatchItemResponse.getColor())
+                    .size(productBatchItemResponse.getSize())
+                    .thumbnail(productBatchItemResponse.getThumbnail())
                     .sku(productBatchItemResponse.getSku())
                     .unitPrice(productBatchItemResponse.getPrice())
                     .qty(cartItem.getQty())
@@ -491,6 +495,10 @@ public class CartService {
                         itemCheckoutToken -> new CartItemDataCheckoutTokenResponse(
                                 itemCheckoutToken.getVariantId(),
                                 itemCheckoutToken.getProductId(),
+                                itemCheckoutToken.getProductName(),
+                                itemCheckoutToken.getColor(),
+                                itemCheckoutToken.getSize(),
+                                itemCheckoutToken.getThumbnail(),
                                 itemCheckoutToken.getSku(),
                                 itemCheckoutToken.getUnitPrice(),
                                 itemCheckoutToken.getQty(),

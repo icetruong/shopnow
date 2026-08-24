@@ -1,6 +1,7 @@
 package com.qlda.userservice.Service;
 
 import com.qlda.userservice.DTO.Request.Address.AddressRequest;
+import com.qlda.userservice.DTO.Response.Address.AddressInternalResponse;
 import com.qlda.userservice.DTO.Response.Address.AddressResponse;
 import com.qlda.userservice.Entity.User;
 import com.qlda.userservice.Entity.UserAddress;
@@ -88,6 +89,21 @@ public class AddressService {
 
         userAddress.setIsDefault(true);
         userAddressRepo.save(userAddress);
+    }
+
+    public AddressInternalResponse getAddressInternal(UUID userId, UUID addressId)
+    {
+        UserAddress userAddress = userAddressRepo.findByIdAndUser_Id(addressId, userId)
+                .orElseThrow(() -> new ResourceNotFoundException("Address not found"));
+
+        return new AddressInternalResponse(
+                userAddress.getFullName(),
+                userAddress.getPhone(),
+                userAddress.getProvince(),
+                userAddress.getDistrict(),
+                userAddress.getWard(),
+                userAddress.getStreetDetail()
+        );
     }
 
     private void setAllNotDefault(String email)

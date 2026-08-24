@@ -432,12 +432,16 @@ Order Service gọi để lấy cart data đã validate khi tạo order.
   "userId":  "user-uuid-1",
   "items": [
     {
-      "variantId":  "var-uuid-1",
-      "productId":  "prod-uuid-1",
-      "sku":        "POLO-WHITE-S",
-      "unitPrice":  249000,
-      "qty":        2,
-      "subtotal":   498000
+      "variantId":   "var-uuid-1",
+      "productId":   "prod-uuid-1",
+      "productName": "Áo Polo Nam Basic",
+      "color":       "Trắng",
+      "size":        "S",
+      "thumbnail":   "https://storage.shopnow.com/products/ao-polo/thumb.jpg",
+      "sku":         "POLO-WHITE-S",
+      "unitPrice":   249000,
+      "qty":         2,
+      "subtotal":    498000
     }
   ],
   "couponCode":  "SALE10",
@@ -447,6 +451,8 @@ Order Service gọi để lấy cart data đã validate khi tạo order.
   "expiresAt":   "2024-01-15T10:45:00Z"
 }
 ```
+
+**Vì sao có `productName/color/size/thumbnail` ở đây:** Order Service cần các field này để lưu snapshot vào bảng `order_items` (xem PHẦN 2 — `orderServiceApiSpec.md`). Cart Service đã gọi Product Service để lấy dữ liệu này ngay lúc `checkout/validate`, nên trả kèm luôn ở bước lấy checkout data — tránh Order Service phải gọi lại Product Service lần nữa cho cùng một thông tin.
 
 **Response 404** — token hết hạn hoặc không hợp lệ
 ```json
@@ -558,13 +564,17 @@ TTL:   900 giây (15 phút)
   "userId":        "user-uuid-1",
   "items": [
     {
-      "cartItemId": "item-uuid-1",
-      "variantId":  "var-uuid-1",
-      "productId":  "prod-uuid-1",
-      "sku":        "POLO-WHITE-S",
-      "unitPrice":  249000,
-      "qty":        2,
-      "subtotal":   498000
+      "cartItemId":  "item-uuid-1",
+      "variantId":   "var-uuid-1",
+      "productId":   "prod-uuid-1",
+      "productName": "Áo Polo Nam Basic",
+      "color":       "Trắng",
+      "size":        "S",
+      "thumbnail":   "https://storage.shopnow.com/products/ao-polo/thumb.jpg",
+      "sku":         "POLO-WHITE-S",
+      "unitPrice":   249000,
+      "qty":         2,
+      "subtotal":    498000
     }
   ],
   "couponCode":   "SALE10",
