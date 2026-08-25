@@ -328,7 +328,50 @@ startDate = 2024-01-01
 endDate   = 2024-01-31
 ```
 
-**Response 200:** Page danh sách payment.
+**Response 200**
+```json
+{
+  "success": true,
+  "message": "Lấy danh sách thanh toán thành công",
+  "data": {
+    "content": [
+      {
+        "paymentId":     "pay-uuid-1",
+        "orderId":       "order-uuid-1",
+        "orderCode":     "SN240115001",
+        "userId":        "user-uuid-1",
+        "method":        "VNPAY",
+        "amount":        448200,
+        "status":        "SUCCESS",
+        "transactionId": "VNP14238901",
+        "paidAt":        "2024-01-15T10:35:00Z",
+        "createdAt":     "2024-01-15T10:30:00Z"
+      },
+      {
+        "paymentId":     "pay-uuid-2",
+        "orderId":       "order-uuid-2",
+        "orderCode":     "SN240115002",
+        "userId":        "user-uuid-3",
+        "method":        "COD",
+        "amount":        225000,
+        "status":        "PENDING",
+        "transactionId": null,
+        "paidAt":        null,
+        "createdAt":     "2024-01-15T11:02:00Z"
+      }
+    ],
+    "page":          0,
+    "size":          20,
+    "totalElements": 137,
+    "totalPages":    7
+  }
+}
+```
+
+**Ghi chú:**
+- Không truyền `status`/`method`/`startDate`/`endDate` → trả toàn bộ payment, sort mặc định `created_at DESC`.
+- `startDate`/`endDate` lọc theo `created_at`, khoảng đóng 2 đầu (bao gồm cả ngày `endDate`).
+- `transactionId`/`paidAt` là `null` với payment chưa thanh toán xong (`PENDING`/`FAILED`/`EXPIRED`).
 
 ---
 

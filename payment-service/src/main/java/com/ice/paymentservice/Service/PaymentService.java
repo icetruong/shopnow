@@ -8,12 +8,19 @@ import com.ice.paymentservice.Enum.*;
 import com.ice.paymentservice.Exception.ResourceNotFoundException;
 import com.ice.paymentservice.Repository.PaymentRepo;
 import com.ice.paymentservice.Repository.PaymentTransactionRepo;
+import com.ice.paymentservice.Specification.PaymentSpecification;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.time.ZoneId;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -132,6 +139,43 @@ public class PaymentService {
                 payment.getId().toString(),
                 payment.getStatus().toString(),
                 payment.getPaidAt().atZone(ZoneId.systemDefault()).toInstant()
+        );
+    }
+
+    public PaymentPageResponse getPaymentDetail(int page, int size, PaymentStatus status, PaymentMethod method, LocalDate startDate, LocalDate endDate) {
+
+        LocalDateTime start = startDate != null ? startDate.atStartOfDay() : null;
+        LocalDateTime end = endDate != null ? endDate.atTime(LocalTime.MAX) : null;
+
+        Specification<Payment> specification = Specification
+                .where(PaymentSpecification.hasMethod(method))
+                .and(PaymentSpecification.hasStatus(status))
+                .and(PaymentSpecification.betweenDays(start, end));
+
+        Page<Payment> payments = paymentRepo.findAll(specification, PageRequest.of(page, size));
+
+        List<PaymentDetailResponse> paymentDetailResponseList = payments.stream()
+                .map(payment -> new PaymentDetailResponse(
+                        payment.getId().toString(),
+                        payment.getOrderId().toString(),
+                        payment.getOrderCode(),
+                        payment.getUserId().toString(),
+                        payment.getMethod(),
+                        payment.getAmount(),
+                        payment.getStatus(),
+                        payment.getTransactionId(),
+                        payment.getPaidAt() != null
+                                ? payment.getPaidAt().atZone(ZoneId.systemDefault()).toInstant()
+                                : null,
+                        payment.getCreatedAt().atZone(ZoneId.systemDefault()).toInstant()
+                )).toList();
+
+        return new PaymentPageResponse(
+                paymentDetailResponseList,
+                payments.getNumber(),
+                payments.getSize(),
+                payments.getTotalElements(),
+                payments.getTotalPages()
         );
     }
 
