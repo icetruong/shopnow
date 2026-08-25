@@ -1,6 +1,7 @@
 package com.ice.paymentservice.Exception;
 
 import com.ice.paymentservice.DTO.Reponse.Common.ApiResponse;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -16,6 +17,12 @@ public class HandleGlobalException {
     {
         return ResponseEntity.badRequest()
                 .body(ApiResponse.fail(ex.getMessage(), "INVALID_REQUEST"));
+    }
+
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    public ResponseEntity<ApiResponse<Void>> handleDuplicate(DataIntegrityViolationException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(ApiResponse.fail("Đơn hàng đã có payment", "PAYMENT_ALREADY_PROCESSED"));
     }
 
     @ExceptionHandler(ResourceNotFoundException.class)

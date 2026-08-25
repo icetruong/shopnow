@@ -30,6 +30,7 @@ Order Service gọi service-to-service khi tạo đơn hàng cần thanh toán o
 {
   "orderId":     "order-uuid-1",
   "orderCode":   "SN240115001",
+  "userId":      "user-uuid-1",
   "amount":      448200,
   "method":      "VNPAY",
   "returnUrl":   "http://localhost:3000/orders/order-uuid-1/result",
@@ -38,34 +39,29 @@ Order Service gọi service-to-service khi tạo đơn hàng cần thanh toán o
 ```
 
 **method values:** `VNPAY` / `MOMO` / `STRIPE` / `COD`
+**userId:** chủ đơn hàng, lưu vào `payments.user_id` (NOT NULL)
 **bankCode:** optional, chỉ dùng cho VNPay nếu muốn chọn sẵn ngân hàng
 
 **Response 200** — cổng online
 ```json
 {
-  "success": true,
-  "data": {
-    "paymentId":   "pay-uuid-1",
-    "orderId":     "order-uuid-1",
-    "method":      "VNPAY",
-    "amount":      448200,
-    "status":      "PENDING",
-    "paymentUrl":  "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html?vnp_Amount=44820000&...",
-    "expiresAt":   "2024-01-15T10:45:00Z"
-  }
+  "paymentId":   "pay-uuid-1",
+  "orderId":     "order-uuid-1",
+  "method":      "VNPAY",
+  "amount":      448200,
+  "status":      "PENDING",
+  "paymentUrl":  "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html?vnp_Amount=44820000&...",
+  "expiresAt":   "2024-01-15T10:45:00Z"
 }
 ```
 
 **Response 200** — COD (không cần cổng thanh toán)
 ```json
 {
-  "success": true,
-  "data": {
-    "paymentId": "pay-uuid-1",
-    "method":    "COD",
-    "status":    "PENDING",
-    "message":   "Thanh toán khi nhận hàng."
-  }
+  "paymentId": "pay-uuid-1",
+  "method":    "COD",
+  "status":    "PENDING",
+  "message":   "Thanh toán khi nhận hàng."
 }
 ```
 
@@ -92,6 +88,7 @@ Lấy trạng thái thanh toán.
 ```json
 {
   "success": true,
+  "message": "Lấy thông tin thanh toán thành công",
   "data": {
     "paymentId":     "pay-uuid-1",
     "orderId":       "order-uuid-1",
@@ -246,14 +243,11 @@ Order Service gọi **đồng bộ (REST)** khi cần hoàn tiền (user hủy �
 **Response 200**
 ```json
 {
-  "success": true,
-  "data": {
-    "refundId":     "refund-uuid-1",
-    "paymentId":    "pay-uuid-1",
-    "amount":       448200,
-    "status":       "REFUNDING",
-    "message":      "Yêu cầu hoàn tiền đã được gửi. Xử lý trong 3-5 ngày."
-  }
+  "refundId":  "refund-uuid-1",
+  "paymentId": "pay-uuid-1",
+  "amount":    448200,
+  "status":    "REFUNDING",
+  "message":   "Yêu cầu hoàn tiền đã được gửi. Xử lý trong 3-5 ngày."
 }
 ```
 
@@ -301,12 +295,9 @@ Order Service gọi khi đơn COD chuyển sang `DELIVERED` (đã thu tiền lú
 **Response 200**
 ```json
 {
-  "success": true,
-  "data": {
-    "paymentId": "pay-uuid-1",
-    "status":    "SUCCESS",
-    "paidAt":    "2024-01-20T14:00:00Z"
-  }
+  "paymentId": "pay-uuid-1",
+  "status":    "SUCCESS",
+  "paidAt":    "2024-01-20T14:00:00Z"
 }
 ```
 
