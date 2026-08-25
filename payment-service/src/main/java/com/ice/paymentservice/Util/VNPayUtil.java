@@ -75,4 +75,27 @@ public class VNPayUtil {
 
         return computedHash.equalsIgnoreCase(receivedHash);
     }
+
+    /**
+     * Refund/querydr KHÔNG dùng format key=value&... như payment URL — VNPay yêu cầu raw string
+     * nối các field bằng dấu "|" theo đúng thứ tự cố định trong tài liệu, không sort, không encode.
+     */
+    public static String buildRefundHashData(String requestId, String version, String command, String tmnCode,
+                                               String transactionType, String txnRef, long amount,
+                                               String transactionNo, String transactionDate, String createBy,
+                                               String createDate, String ipAddr, String orderInfo) {
+        return String.join("|",
+                requestId, version, command, tmnCode, transactionType, txnRef,
+                String.valueOf(amount), transactionNo, transactionDate, createBy,
+                createDate, ipAddr, orderInfo);
+    }
+
+    /** Thứ tự field querydr khác refund — cũng nối bằng "|", cũng không có vnp_TransactionType. */
+    public static String buildQueryDrHashData(String requestId, String version, String command, String tmnCode,
+                                                String txnRef, String transactionDate, String createDate,
+                                                String ipAddr, String orderInfo) {
+        return String.join("|",
+                requestId, version, command, tmnCode, txnRef,
+                transactionDate, createDate, ipAddr, orderInfo);
+    }
 }

@@ -1,10 +1,12 @@
 package com.ice.paymentservice.Controller.Internal;
 
 import com.ice.paymentservice.DTO.Request.Payment.CreatePaymentRequest;
+import com.ice.paymentservice.DTO.Request.Payment.RefundRequest;
 import com.ice.paymentservice.DTO.Response.Common.ApiResponse;
 import com.ice.paymentservice.DTO.Response.Payment.ConfirmCodResponse;
 import com.ice.paymentservice.DTO.Response.Payment.PaymentInternalResponse;
 import com.ice.paymentservice.DTO.Response.Payment.PaymentResponse;
+import com.ice.paymentservice.DTO.Response.Payment.RefundResponse;
 import com.ice.paymentservice.Service.PaymentService;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
@@ -24,6 +26,13 @@ public class PaymentInternalController {
     public ResponseEntity<Object> createPayment(@RequestBody CreatePaymentRequest request, HttpServletRequest httpRequest)
     {
         return ResponseEntity.ok(paymentService.createPayment(request, httpRequest));
+    }
+
+    @PostMapping("/{paymentId}/refund")
+    public ResponseEntity<RefundResponse> refund(@PathVariable String paymentId, @RequestBody RefundRequest request,
+                                                  HttpServletRequest httpRequest)
+    {
+        return ResponseEntity.ok(paymentService.refundPayment(paymentId, request, httpRequest));
     }
 
     @GetMapping("/order/{orderId}")

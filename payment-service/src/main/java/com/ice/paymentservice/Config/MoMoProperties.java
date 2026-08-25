@@ -14,6 +14,8 @@ public class MoMoProperties {
     private String accessKey;
     private String secretKey;
     private String endpoint;
+    private String refundEndpoint;
+    private String queryEndpoint;
     private String ipnUrl;
     private String redirectUrl;
     private String requestType;

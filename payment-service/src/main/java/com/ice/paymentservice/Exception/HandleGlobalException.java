@@ -31,6 +31,18 @@ public class HandleGlobalException {
                 .body(ApiResponse.fail(ex.getMessage(), "NOT_FOUND"));
     }
 
+    @ExceptionHandler(ConflictException.class)
+    public ResponseEntity<ApiResponse<Void>> handleConflict(ConflictException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(ApiResponse.fail(ex.getMessage(), ex.getErrorCode()));
+    }
+
+    @ExceptionHandler(GatewayException.class)
+    public ResponseEntity<ApiResponse<Void>> handleGateway(GatewayException ex) {
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                .body(ApiResponse.fail(ex.getMessage(), "GATEWAY_ERROR"));
+    }
+
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ApiResponse<Void>> handleValidation(MethodArgumentNotValidException ex) {
 

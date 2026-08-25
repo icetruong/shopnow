@@ -1,21 +1,31 @@
 package com.ice.paymentservice.Service;
 
 import com.ice.paymentservice.Client.MoMoClient;
+import com.ice.paymentservice.Client.VNPayClient;
 import com.ice.paymentservice.Config.MoMoProperties;
 import com.ice.paymentservice.Config.StripeProperties;
 import com.ice.paymentservice.Config.VNPayProperties;
 import com.ice.paymentservice.DTO.Request.Payment.CreatePaymentRequest;
 import com.ice.paymentservice.DTO.Request.Payment.MoMoCreatePaymentRequest;
 import com.ice.paymentservice.DTO.Request.Payment.MoMoIpnRequest;
+import com.ice.paymentservice.DTO.Request.Payment.MoMoQueryRequest;
+import com.ice.paymentservice.DTO.Request.Payment.MoMoRefundRequest;
+import com.ice.paymentservice.DTO.Request.Payment.RefundRequest;
+import com.ice.paymentservice.DTO.Request.Payment.VNPayQueryDrRequest;
+import com.ice.paymentservice.DTO.Request.Payment.VNPayRefundRequest;
 import com.ice.paymentservice.DTO.Response.Payment.*;
 import com.ice.paymentservice.Entity.Payment;
 import com.ice.paymentservice.Entity.PaymentTransaction;
 import com.ice.paymentservice.Entity.ProcessedWebhook;
+import com.ice.paymentservice.Entity.Refund;
 import com.ice.paymentservice.Enum.*;
+import com.ice.paymentservice.Exception.ConflictException;
+import com.ice.paymentservice.Exception.GatewayException;
 import com.ice.paymentservice.Exception.ResourceNotFoundException;
 import com.ice.paymentservice.Repository.PaymentRepo;
 import com.ice.paymentservice.Repository.PaymentTransactionRepo;
 import com.ice.paymentservice.Repository.ProcessedWebhookRepo;
+import com.ice.paymentservice.Repository.RefundRepo;
 import com.ice.paymentservice.Specification.PaymentSpecification;
 import com.ice.paymentservice.Util.MoMoUtil;
 import com.ice.paymentservice.Util.VNPayUtil;
@@ -25,6 +35,7 @@ import com.stripe.exception.StripeException;
 import com.stripe.model.Event;
 import com.stripe.model.checkout.Session;
 import com.stripe.net.Webhook;
+import com.stripe.param.RefundCreateParams;
 import com.stripe.param.checkout.SessionCreateParams;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
@@ -39,6 +50,7 @@ import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -50,7 +62,9 @@ public class PaymentService {
     private final PaymentRepo paymentRepo;
     private final PaymentTransactionRepo paymentTransactionRepo;
     private final ProcessedWebhookRepo processedWebhookRepo;
+    private final RefundRepo refundRepo;
     private final VNPayProperties vnPayProperties;
+    private final VNPayClient vnPayClient;
     private final MoMoProperties moMoProperties;
     private final MoMoClient moMoClient;
     private final StripeProperties stripeProperties;
@@ -448,6 +462,9 @@ public class PaymentService {
 
         try {
             Session session = Session.create(params);
+            // Lưu lại sessionId để đối soát sau này — Stripe không dùng payment.getId() làm khóa
+            // tra cứu như VNPay/MoMo nên cần tự lưu, không thì không có gì để query lại trạng thái.
+            payment.setGatewayResponse(Map.of("stripeSessionId", session.getId()));
             return session.getUrl();
         } catch (StripeException e) {
             throw new IllegalStateException("Stripe tạo Checkout Session thất bại: " + e.getMessage(), e);
@@ -510,5 +527,248 @@ public class PaymentService {
                 .paymentId(payment.getId())
                 .build();
         processedWebhookRepo.save(webhook);
+    }
+
+    @Transactional
+    public RefundResponse refundPayment(String paymentId, RefundRequest request, HttpServletRequest httpRequest) {
+        Payment payment = paymentRepo.findById(UUID.fromString(paymentId))
+                .orElseThrow(() -> new ResourceNotFoundException("không tìm thấy payment"));
+
+        UUID orderId = UUID.fromString(request.getOrderId());
+        if (!payment.getOrderId().equals(orderId)) {
+            throw new IllegalArgumentException("orderId không khớp với payment");
+        }
+
+        if (payment.getStatus() != PaymentStatus.SUCCESS) {
+            throw new IllegalArgumentException("Chỉ hoàn tiền được payment đang ở trạng thái SUCCESS");
+        }
+
+        if (refundRepo.existsByOrderId(orderId)) {
+            throw new ConflictException("Đơn hàng đã được hoàn tiền", ErrorCode.REFUND_ALREADY_DONE.name());
+        }
+
+        String gatewayRefundId = switch (payment.getMethod()) {
+            case VNPAY -> refundVnPay(payment, request, httpRequest);
+            case MOMO -> refundMoMo(payment, request);
+            case STRIPE -> refundStripe(payment, request);
+            // COD chưa từng qua cổng thanh toán nào — hoàn tiền là thao tác thủ công (trả tiền mặt),
+            // không có gateway để gọi nên coi như hoàn tất ngay khi ghi nhận.
+            case COD -> null;
+        };
+
+        Refund refund = Refund.builder()
+                .paymentId(payment.getId())
+                .orderId(orderId)
+                .amount(request.getAmount())
+                .reason(request.getReason())
+                .status(RefundStatus.REFUNDED)
+                .gatewayRefundId(gatewayRefundId)
+                .refundedAt(LocalDateTime.now())
+                .build();
+        Refund savedRefund = refundRepo.save(refund);
+
+        payment.setStatus(PaymentStatus.REFUNDED);
+
+        return new RefundResponse(
+                savedRefund.getId().toString(),
+                payment.getId().toString(),
+                savedRefund.getAmount(),
+                savedRefund.getStatus().toString(),
+                "Hoàn tiền thành công."
+        );
+    }
+
+    private String refundVnPay(Payment payment, RefundRequest request, HttpServletRequest httpRequest) {
+        String requestId = UUID.randomUUID().toString();
+        String transactionType = request.getAmount().equals(payment.getAmount()) ? "02" : "03";
+        String createDate = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss"));
+        String transactionDate = payment.getPaidAt().format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss"));
+        String orderInfo = "Hoan tien don hang " + payment.getOrderCode();
+        String ipAddr = VNPayUtil.getIpAddress(httpRequest);
+        String createBy = "payment-service";
+
+        String rawHash = VNPayUtil.buildRefundHashData(
+                requestId, vnPayProperties.getVersion(), "refund", vnPayProperties.getTmnCode(),
+                transactionType, payment.getId().toString(), request.getAmount() * 100,
+                payment.getTransactionId(), transactionDate, createBy, createDate, ipAddr, orderInfo
+        );
+        String secureHash = VNPayUtil.hmacSHA512(vnPayProperties.getHashSecret(), rawHash);
+
+        VNPayRefundRequest vnPayRequest = new VNPayRefundRequest(
+                requestId, vnPayProperties.getVersion(), "refund", vnPayProperties.getTmnCode(),
+                transactionType, payment.getId().toString(), request.getAmount() * 100, orderInfo,
+                payment.getTransactionId(), transactionDate, createBy, createDate, ipAddr, secureHash
+        );
+
+        VNPayTransactionResponse response = vnPayClient.refund(vnPayProperties.getTransactionUrl(), vnPayRequest);
+
+        if (response == null || !"00".equals(response.getResponseCode())) {
+            throw new GatewayException("VNPay refund thất bại: "
+                    + (response != null ? response.getMessage() : "không có phản hồi"));
+        }
+
+        return response.getTransactionNo();
+    }
+
+    private String refundMoMo(Payment payment, RefundRequest request) {
+        String requestId = UUID.randomUUID().toString();
+        String description = "Hoan tien: " + request.getReason();
+        String orderId = payment.getId().toString();
+        long transId = Long.parseLong(payment.getTransactionId());
+
+        String rawSignature = MoMoUtil.buildRefundSignatureData(
+                moMoProperties.getAccessKey(), request.getAmount(), description,
+                orderId, moMoProperties.getPartnerCode(), requestId, transId
+        );
+        String signature = MoMoUtil.hmacSHA256(moMoProperties.getSecretKey(), rawSignature);
+
+        MoMoRefundRequest moMoRequest = new MoMoRefundRequest(
+                moMoProperties.getPartnerCode(), orderId, requestId, request.getAmount(),
+                transId, moMoProperties.getLang(), description, signature
+        );
+
+        MoMoRefundResponse response = moMoClient.refund(moMoProperties.getRefundEndpoint(), moMoRequest);
+
+        if (response == null || response.getResultCode() != 0) {
+            throw new GatewayException("MoMo refund thất bại: "
+                    + (response != null ? response.getMessage() : "không có phản hồi"));
+        }
+
+        return String.valueOf(response.getTransId());
+    }
+
+    private String refundStripe(Payment payment, RefundRequest request) {
+        Stripe.apiKey = stripeProperties.getSecretKey();
+        try {
+            RefundCreateParams params = RefundCreateParams.builder()
+                    .setPaymentIntent(payment.getTransactionId())
+                    .setAmount(request.getAmount())
+                    .build();
+            com.stripe.model.Refund stripeRefund = com.stripe.model.Refund.create(params);
+            return stripeRefund.getId();
+        } catch (StripeException e) {
+            throw new GatewayException("Stripe refund thất bại: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Gọi trực tiếp API truy vấn trạng thái của từng cổng cho từng payment trong ngày — không có
+     * bulk API nào của VNPay/MoMo/Stripe trả toàn bộ giao dịch 1 lần nên đây là N lệnh gọi tuần tự.
+     * Chấp nhận được vì đây là thao tác ADMIN, tần suất thấp, không phải hot path.
+     */
+    public ReconciliationResponse getReconciliation(LocalDate date, PaymentMethod method, HttpServletRequest httpRequest) {
+        if (method == null || method == PaymentMethod.COD) {
+            throw new IllegalArgumentException("Đối soát chỉ áp dụng cho VNPAY, MOMO hoặc STRIPE");
+        }
+
+        LocalDateTime start = date.atStartOfDay();
+        LocalDateTime end = date.atTime(LocalTime.MAX);
+        List<Payment> payments = paymentRepo.findByMethodAndCreatedAtBetween(method, start, end);
+
+        long totalAmount = payments.stream().mapToLong(Payment::getAmount).sum();
+        List<ReconciliationMismatchDetail> mismatchDetails = new ArrayList<>();
+        int matched = 0;
+
+        for (Payment payment : payments) {
+            String gatewayStatus = switch (method) {
+                case VNPAY -> queryVnPayStatus(payment, httpRequest);
+                case MOMO -> queryMoMoStatus(payment);
+                case STRIPE -> queryStripeStatus(payment);
+                case COD -> "UNKNOWN";
+            };
+
+            String dbStatus = payment.getStatus().name();
+            if (gatewayStatus.equals(dbStatus)) {
+                matched++;
+                continue;
+            }
+
+            String issue = switch (gatewayStatus) {
+                case "UNKNOWN" -> "Không truy vấn được trạng thái từ cổng thanh toán";
+                case "SUCCESS" -> "IPN chưa nhận được";
+                default -> "Trạng thái DB và cổng thanh toán không khớp";
+            };
+            mismatchDetails.add(new ReconciliationMismatchDetail(payment.getOrderCode(), dbStatus, gatewayStatus, issue));
+        }
+
+        return new ReconciliationResponse(
+                date, method.name(), payments.size(), totalAmount,
+                matched, payments.size() - matched, mismatchDetails
+        );
+    }
+
+    private String queryVnPayStatus(Payment payment, HttpServletRequest httpRequest) {
+        String requestId = UUID.randomUUID().toString();
+        String createDate = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss"));
+        String transactionDate = payment.getCreatedAt().format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss"));
+        String orderInfo = "Truy van don hang " + payment.getOrderCode();
+        String ipAddr = VNPayUtil.getIpAddress(httpRequest);
+
+        String rawHash = VNPayUtil.buildQueryDrHashData(
+                requestId, vnPayProperties.getVersion(), "querydr", vnPayProperties.getTmnCode(),
+                payment.getId().toString(), transactionDate, createDate, ipAddr, orderInfo
+        );
+        String secureHash = VNPayUtil.hmacSHA512(vnPayProperties.getHashSecret(), rawHash);
+
+        VNPayQueryDrRequest queryRequest = new VNPayQueryDrRequest(
+                requestId, vnPayProperties.getVersion(), "querydr", vnPayProperties.getTmnCode(),
+                payment.getId().toString(), orderInfo, transactionDate, createDate, ipAddr, secureHash
+        );
+
+        VNPayTransactionResponse response = vnPayClient.queryTransaction(vnPayProperties.getTransactionUrl(), queryRequest);
+
+        if (response == null || !"00".equals(response.getResponseCode()) || response.getTransactionStatus() == null) {
+            return "UNKNOWN";
+        }
+
+        return switch (response.getTransactionStatus()) {
+            case "00" -> "SUCCESS";
+            case "01" -> "PENDING";
+            case "04", "05", "06" -> "REFUNDED";
+            default -> "FAILED";
+        };
+    }
+
+    private String queryMoMoStatus(Payment payment) {
+        String requestId = UUID.randomUUID().toString();
+        String orderId = payment.getId().toString();
+
+        String rawSignature = MoMoUtil.buildQuerySignatureData(
+                moMoProperties.getAccessKey(), orderId, moMoProperties.getPartnerCode(), requestId
+        );
+        String signature = MoMoUtil.hmacSHA256(moMoProperties.getSecretKey(), rawSignature);
+
+        MoMoQueryRequest queryRequest = new MoMoQueryRequest(
+                moMoProperties.getPartnerCode(), requestId, orderId, moMoProperties.getLang(), signature
+        );
+
+        MoMoQueryResponse response = moMoClient.queryStatus(moMoProperties.getQueryEndpoint(), queryRequest);
+
+        if (response == null) {
+            return "UNKNOWN";
+        }
+
+        return response.getResultCode() == 0 ? "SUCCESS" : "FAILED";
+    }
+
+    private String queryStripeStatus(Payment payment) {
+        Object sessionId = payment.getGatewayResponse() != null
+                ? payment.getGatewayResponse().get("stripeSessionId")
+                : null;
+        if (sessionId == null) {
+            return "UNKNOWN";
+        }
+
+        Stripe.apiKey = stripeProperties.getSecretKey();
+        try {
+            Session session = Session.retrieve(sessionId.toString());
+            return switch (session.getPaymentStatus()) {
+                case "paid" -> "SUCCESS";
+                case "unpaid" -> "PENDING";
+                default -> "FAILED";
+            };
+        } catch (StripeException e) {
+            return "UNKNOWN";
+        }
     }
 }

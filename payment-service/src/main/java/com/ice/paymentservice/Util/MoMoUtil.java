@@ -64,4 +64,24 @@ public class MoMoUtil {
                 "&resultCode=" + resultCode +
                 "&transId=" + transId;
     }
+
+    public static String buildRefundSignatureData(String accessKey, long amount, String description,
+                                                     String orderId, String partnerCode, String requestId,
+                                                     long transId) {
+        return "accessKey=" + accessKey +
+                "&amount=" + amount +
+                "&description=" + description +
+                "&orderId=" + orderId +
+                "&partnerCode=" + partnerCode +
+                "&requestId=" + requestId +
+                "&transId=" + transId;
+    }
+
+    public static String buildQuerySignatureData(String accessKey, String orderId, String partnerCode,
+                                                   String requestId) {
+        return "accessKey=" + accessKey +
+                "&orderId=" + orderId +
+                "&partnerCode=" + partnerCode +
+                "&requestId=" + requestId;
+    }
 }

@@ -13,6 +13,7 @@ public class VNPayProperties {
     private String tmnCode;
     private String hashSecret;
     private String payUrl;
+    private String transactionUrl;
     private String returnUrl;
     private String version;
     private String command;
