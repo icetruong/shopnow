@@ -5,6 +5,8 @@ import com.ice.paymentservice.Client.VNPayClient;
 import com.ice.paymentservice.Config.MoMoProperties;
 import com.ice.paymentservice.Config.StripeProperties;
 import com.ice.paymentservice.Config.VNPayProperties;
+import com.ice.paymentservice.DTO.Event.PaymentProcessedPayload;
+import com.ice.paymentservice.DTO.Event.PaymentRefundPayload;
 import com.ice.paymentservice.DTO.Request.Payment.CreatePaymentRequest;
 import com.ice.paymentservice.DTO.Request.Payment.MoMoCreatePaymentRequest;
 import com.ice.paymentservice.DTO.Request.Payment.MoMoIpnRequest;
@@ -68,6 +70,7 @@ public class PaymentService {
     private final MoMoProperties moMoProperties;
     private final MoMoClient moMoClient;
     private final StripeProperties stripeProperties;
+    private final KafkaProducerService kafkaProducerService;
 
     @Transactional
     public Object createPayment(CreatePaymentRequest request, HttpServletRequest httpRequest) {
@@ -328,6 +331,18 @@ public class PaymentService {
                 .build();
         processedWebhookRepo.save(webhook);
 
+        if (isSuccess) {
+            kafkaProducerService.publishProcessedPaymentEvent(new PaymentProcessedPayload(
+                    payment.getOrderId().toString(),
+                    payment.getId().toString(),
+                    payment.getStatus(),
+                    payment.getMethod(),
+                    payment.getAmount(),
+                    payment.getTransactionId(),
+                    payment.getPaidAt().atZone(ZoneId.systemDefault()).toInstant()
+            ));
+        }
+
         return VNPayIpnResponse.of("00", "Confirm Success");
     }
 
@@ -427,6 +442,18 @@ public class PaymentService {
                 .paymentId(payment.getId())
                 .build();
         processedWebhookRepo.save(webhook);
+
+        if (isSuccess) {
+            kafkaProducerService.publishProcessedPaymentEvent(new PaymentProcessedPayload(
+                    payment.getOrderId().toString(),
+                    payment.getId().toString(),
+                    payment.getStatus(),
+                    payment.getMethod(),
+                    payment.getAmount(),
+                    payment.getTransactionId(),
+                    payment.getPaidAt().atZone(ZoneId.systemDefault()).toInstant()
+            ));
+        }
     }
 
     private String buildStripeUrl(Payment payment, CreatePaymentRequest request) {
@@ -527,6 +554,18 @@ public class PaymentService {
                 .paymentId(payment.getId())
                 .build();
         processedWebhookRepo.save(webhook);
+
+        kafkaProducerService.publishProcessedPaymentEvent(new PaymentProcessedPayload(
+                payment.getOrderId().toString(),
+                payment.getId().toString(),
+                payment.getStatus(),
+                payment.getMethod(),
+                payment.getAmount(),
+                payment.getTransactionId(),
+                payment.getPaidAt() != null
+                        ? payment.getPaidAt().atZone(ZoneId.systemDefault()).toInstant()
+                        : null
+        ));
     }
 
     @Transactional
@@ -568,6 +607,13 @@ public class PaymentService {
         Refund savedRefund = refundRepo.save(refund);
 
         payment.setStatus(PaymentStatus.REFUNDED);
+
+        kafkaProducerService.publishRefundedPaymentEvent(new PaymentRefundPayload(
+                savedRefund.getOrderId().toString(),
+                savedRefund.getId().toString(),
+                savedRefund.getAmount(),
+                savedRefund.getRefundedAt().atZone(ZoneId.systemDefault()).toInstant()
+        ));
 
         return new RefundResponse(
                 savedRefund.getId().toString(),
