@@ -1,4 +1,11 @@
 package com.ice.paymentservice.Enum;
 
 public enum ErrorCode {
+    PAYMENT_NOT_FOUND,
+    INVALID_SIGNATURE,
+    AMOUNT_MISMATCH,
+    PAYMENT_ALREADY_PROCESSED,
+    PAYMENT_EXPIRED,
+    REFUND_ALREADY_DONE,
+    GATEWAY_ERROR
 }

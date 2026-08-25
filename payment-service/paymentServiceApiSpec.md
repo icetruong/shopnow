@@ -20,10 +20,10 @@ Payment Service xử lý toàn bộ thanh toán qua nhiều cổng (VNPay, MoMo,
 
 ---
 
-### POST /payments/create
-Order Service gọi (hoặc client gọi qua Gateway) để tạo phiên thanh toán và lấy URL redirect.
+### POST /internal/payments/create
+Order Service gọi service-to-service khi tạo đơn hàng cần thanh toán online, để tạo phiên thanh toán và lấy URL redirect. Client **không** gọi thẳng endpoint này — client nhận `paymentUrl` gián tiếp qua response của Order Service.
 
-**Header:** `Authorization: Bearer {accessToken}` *(hoặc Internal token nếu Order Service gọi)*
+**Header:** `X-Internal-Token: {sharedSecret}`
 
 **Request Body**
 ```json
@@ -229,7 +229,7 @@ Stripe webhook — Stripe gửi event object.
 
 ---
 
-### POST /payments/{paymentId}/refund
+### POST /internal/payments/{paymentId}/refund
 Order Service gọi **đồng bộ (REST)** khi cần hoàn tiền (user hủy đơn đã thanh toán). Compensating action của Saga — Order Service chủ động gọi ngay khi biết cần compensate, **không** thông qua Kafka event `order.cancelled` (Payment Service không consume event đó).
 
 **Header:** `X-Internal-Token: {sharedSecret}`
@@ -393,15 +393,15 @@ method = VNPAY
 
 | Method | Endpoint | Auth | Role |
 |--------|----------|------|------|
-| POST | /payments/create | ✅ / 🔒 | USER / Internal |
+| POST | /internal/payments/create | 🔒 Internal | Internal (Order Service) |
 | GET | /payments/{paymentId} | ✅ | USER |
 | GET | /payments/vnpay/return | ❌ | — |
 | POST | /payments/vnpay/ipn | ❌ Webhook | — |
 | POST | /payments/momo/ipn | ❌ Webhook | — |
 | POST | /payments/stripe/webhook | ❌ Webhook | — |
-| POST | /payments/{paymentId}/refund | 🔒 Internal | — |
-| GET | /internal/payments/order/{orderId} | 🔒 Internal | — |
-| PATCH | /internal/payments/{paymentId}/confirm-cod | 🔒 Internal | — |
+| POST | /internal/payments/{paymentId}/refund | 🔒 Internal | Internal (Order Service) |
+| GET | /internal/payments/order/{orderId} | 🔒 Internal | Internal (Order Service) |
+| PATCH | /internal/payments/{paymentId}/confirm-cod | 🔒 Internal | Internal (Order Service) |
 | GET | /admin/payments | ✅ | ADMIN |
 | GET | /admin/payments/reconciliation | ✅ | ADMIN |
 
@@ -599,7 +599,7 @@ POST /payments/vnpay/ipn
 
 ## Payment Service không consume Kafka event từ Order Service
 
-Payment Service **chỉ** expose REST API (`POST /payments/create`, `POST /payments/{paymentId}/refund`, `PATCH /internal/payments/{paymentId}/confirm-cod`) và publish event — không consume `order.created` hay `order.cancelled`. Order Service là bên chủ động gọi REST đồng bộ khi cần tạo payment hoặc refund, để tránh 2 service cùng verify/quyết định trạng thái thanh toán qua 2 con đường khác nhau (REST + Kafka).
+Payment Service **chỉ** expose REST API (`POST /internal/payments/create`, `POST /internal/payments/{paymentId}/refund`, `PATCH /internal/payments/{paymentId}/confirm-cod`) và publish event — không consume `order.created` hay `order.cancelled`. Order Service là bên chủ động gọi REST đồng bộ khi cần tạo payment hoặc refund, để tránh 2 service cùng verify/quyết định trạng thái thanh toán qua 2 con đường khác nhau (REST + Kafka).
 
 ---
 
