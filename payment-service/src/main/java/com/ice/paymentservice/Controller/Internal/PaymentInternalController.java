@@ -6,6 +6,7 @@ import com.ice.paymentservice.DTO.Response.Payment.ConfirmCodResponse;
 import com.ice.paymentservice.DTO.Response.Payment.PaymentInternalResponse;
 import com.ice.paymentservice.DTO.Response.Payment.PaymentResponse;
 import com.ice.paymentservice.Service.PaymentService;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
@@ -20,9 +21,9 @@ public class PaymentInternalController {
     private final PaymentService paymentService;
 
     @PostMapping("/create")
-    public ResponseEntity<Object> createPayment(@RequestBody CreatePaymentRequest request)
+    public ResponseEntity<Object> createPayment(@RequestBody CreatePaymentRequest request, HttpServletRequest httpRequest)
     {
-        return ResponseEntity.ok(paymentService.createPayment(request));
+        return ResponseEntity.ok(paymentService.createPayment(request, httpRequest));
     }
 
     @GetMapping("/order/{orderId}")
