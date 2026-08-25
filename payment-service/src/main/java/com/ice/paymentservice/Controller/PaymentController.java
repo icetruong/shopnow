@@ -1,6 +1,6 @@
 package com.ice.paymentservice.Controller;
 
-import com.ice.paymentservice.DTO.Reponse.Common.ApiResponse;
+import com.ice.paymentservice.DTO.Response.Common.ApiResponse;
 import com.ice.paymentservice.DTO.Response.Payment.PaymentResponse;
 import com.ice.paymentservice.Service.PaymentService;
 import lombok.RequiredArgsConstructor;

@@ -449,7 +449,7 @@ Log mọi lần webhook/callback nhận được — không bao giờ update, ch
 | id | UUID | PK, DEFAULT uuid_generate_v4() | |
 | payment_id | UUID | NOT NULL, FK → payments(id) | |
 | type | VARCHAR(20) | NOT NULL | CHARGE / REFUND / IPN / RETURN |
-| gateway | VARCHAR(20) | NOT NULL | VNPAY / MOMO / STRIPE |
+| gateway | VARCHAR(20) | NOT NULL | VNPAY / MOMO / STRIPE / COD |
 | gateway_txn_id | VARCHAR(100) | NULLABLE | Mã giao dịch từ cổng |
 | amount | BIGINT | NOT NULL | |
 | status | VARCHAR(20) | NOT NULL | SUCCESS / FAILED |

@@ -1,26 +1,27 @@
 package com.ice.paymentservice.Service;
 
 import com.ice.paymentservice.DTO.Request.Payment.CreatePaymentRequest;
-import com.ice.paymentservice.DTO.Response.Payment.CreatePaymentCODResponse;
-import com.ice.paymentservice.DTO.Response.Payment.CreatePaymentOnlineResponse;
-import com.ice.paymentservice.DTO.Response.Payment.PaymentResponse;
+import com.ice.paymentservice.DTO.Response.Payment.*;
 import com.ice.paymentservice.Entity.Payment;
-import com.ice.paymentservice.Enum.PaymentMethod;
-import com.ice.paymentservice.Enum.PaymentStatus;
+import com.ice.paymentservice.Entity.PaymentTransaction;
+import com.ice.paymentservice.Enum.*;
 import com.ice.paymentservice.Exception.ResourceNotFoundException;
 import com.ice.paymentservice.Repository.PaymentRepo;
+import com.ice.paymentservice.Repository.PaymentTransactionRepo;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.util.Map;
 import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
 public class PaymentService {
     private final PaymentRepo paymentRepo;
+    private final PaymentTransactionRepo paymentTransactionRepo;
 
     @Transactional
     public Object createPayment(CreatePaymentRequest request) {
@@ -85,6 +86,56 @@ public class PaymentService {
         );
     }
 
+    public PaymentInternalResponse getPaymentInternal(String orderId) {
+        Payment payment = paymentRepo.findByOrderId(UUID.fromString(orderId))
+                .orElseThrow(() -> new ResourceNotFoundException("không tìm thấy payment"));
+
+        return new PaymentInternalResponse(
+                payment.getId().toString(),
+                payment.getOrderId().toString(),
+                payment.getMethod(),
+                payment.getAmount(),
+                payment.getStatus(),
+                payment.getPaidAt() != null
+                        ? payment.getPaidAt().atZone(ZoneId.systemDefault()).toInstant()
+                        : null
+        );
+    }
+
+    public ConfirmCodResponse confirmCodPayment(String paymentId) {
+        Payment payment = paymentRepo.findById(UUID.fromString(paymentId))
+                .orElseThrow(() -> new ResourceNotFoundException("không tìm thấy payment"));
+
+        if(payment.getMethod() != PaymentMethod.COD || payment.getStatus() != PaymentStatus.PENDING)
+        {
+            throw new IllegalArgumentException("Không thể confirm ở trạng thái này");
+        }
+
+        payment.setStatus(PaymentStatus.SUCCESS);
+        payment.setPaidAt(LocalDateTime.now());
+
+        PaymentTransaction paymentTransaction = PaymentTransaction.builder()
+                .paymentId(payment.getId())
+                .type(TransactionType.CHARGE)
+                .gateway(Gateway.COD)
+                .amount(payment.getAmount())
+                .status(TransactionStatus.SUCCESS)
+                .rawPayload(Map.of(
+                        "source", "internal-confirm-cod",
+                        "note", "COD xác nhận thủ công khi Order Service báo đã giao hàng, không qua cổng thanh toán"
+                ))
+                .build();
+
+        paymentTransactionRepo.save(paymentTransaction);
+
+        return new ConfirmCodResponse(
+                payment.getId().toString(),
+                payment.getStatus().toString(),
+                payment.getPaidAt().atZone(ZoneId.systemDefault()).toInstant()
+        );
+    }
+
+
     private String buildPaymentUrl(Payment payment, CreatePaymentRequest request) {
         return switch (payment.getMethod()) {
             case VNPAY -> "TODO: build VNPay URL (HMAC-SHA512) — chưa có config secret/terminal ID";
@@ -93,6 +144,7 @@ public class PaymentService {
             case COD -> throw new IllegalStateException("COD không đi vào nhánh này");
         };
     }
+
 
 
 }

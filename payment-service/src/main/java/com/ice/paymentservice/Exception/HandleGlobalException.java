@@ -1,6 +1,6 @@
 package com.ice.paymentservice.Exception;
 
-import com.ice.paymentservice.DTO.Reponse.Common.ApiResponse;
+import com.ice.paymentservice.DTO.Response.Common.ApiResponse;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;

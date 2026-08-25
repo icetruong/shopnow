@@ -1,13 +1,16 @@
 package com.ice.paymentservice.Controller.Internal;
 
 import com.ice.paymentservice.DTO.Request.Payment.CreatePaymentRequest;
+import com.ice.paymentservice.DTO.Response.Common.ApiResponse;
+import com.ice.paymentservice.DTO.Response.Payment.ConfirmCodResponse;
+import com.ice.paymentservice.DTO.Response.Payment.PaymentInternalResponse;
+import com.ice.paymentservice.DTO.Response.Payment.PaymentResponse;
 import com.ice.paymentservice.Service.PaymentService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.web.bind.annotation.*;
 
 @RestController
 @RequiredArgsConstructor
@@ -20,5 +23,21 @@ public class PaymentInternalController {
     public ResponseEntity<Object> createPayment(@RequestBody CreatePaymentRequest request)
     {
         return ResponseEntity.ok(paymentService.createPayment(request));
+    }
+
+    @GetMapping("/order/{orderId}")
+    public ResponseEntity<PaymentInternalResponse> getPayment(@PathVariable String orderId)
+    {
+        return ResponseEntity.ok(
+                        paymentService.getPaymentInternal(orderId)
+        );
+    }
+
+    @PatchMapping("/{paymentId}/confirm-cod")
+    public ResponseEntity<ConfirmCodResponse> confirmCod(@PathVariable String paymentId)
+    {
+        return ResponseEntity.ok(
+                paymentService.confirmCodPayment(paymentId)
+        );
     }
 }

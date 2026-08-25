@@ -1,4 +1,4 @@
-package com.ice.paymentservice.DTO.Reponse.Common;
+package com.ice.paymentservice.DTO.Response.Common;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.AllArgsConstructor;
