@@ -15,6 +15,6 @@ public class OrderConfirmPayload {
     private String orderId;
     private String orderCode;
     private String userId;
-    private List<ShippingAddressEvent> shippingAddress;
+    private ShippingAddressEvent shippingAddress;
     private List<OrderItemEvent> items;
 }

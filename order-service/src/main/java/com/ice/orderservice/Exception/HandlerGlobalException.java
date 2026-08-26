@@ -100,4 +100,25 @@ public class HandlerGlobalException {
         return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
                 .body(ApiResponse.fail(ex.getMessage(), ErrorCode.PAYMENT_CONFIRM_COD_FAILED.toString()));
     }
+
+    @ExceptionHandler(InventoryReserveFailedException.class)
+    public ResponseEntity<ApiResponse<Void>> handleInventoryReserveFail(InventoryReserveFailedException ex)
+    {
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                .body(ApiResponse.fail(ex.getMessage(), ErrorCode.INVENTORY_RESERVE_FAILED.toString()));
+    }
+
+    @ExceptionHandler(InventoryReleaseFailedException.class)
+    public ResponseEntity<ApiResponse<Void>> handleInventoryReleaseFail(InventoryReleaseFailedException ex)
+    {
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                .body(ApiResponse.fail(ex.getMessage(), ErrorCode.INVENTORY_RELEASE_FAILED.toString()));
+    }
+
+    @ExceptionHandler(InventoryDeductFailedException.class)
+    public ResponseEntity<ApiResponse<Void>> handleInventoryDeductFail(InventoryDeductFailedException ex)
+    {
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                .body(ApiResponse.fail(ex.getMessage(), ErrorCode.INVENTORY_DEDUCT_FAILED.toString()));
+    }
 }

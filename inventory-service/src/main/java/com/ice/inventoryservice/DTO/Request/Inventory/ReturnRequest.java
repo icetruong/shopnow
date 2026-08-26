@@ -1,18 +1,16 @@
-package com.ice.inventoryservice.DTO.Response.Inventory;
+package com.ice.inventoryservice.DTO.Request.Inventory;
 
+import jakarta.validation.constraints.NotBlank;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
-import java.time.Instant;
-
 @Getter
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
-public class ReturnResponse {
-    private Boolean success;
+public class ReturnRequest {
+    @NotBlank(message = "orderId must not blank")
     private String orderId;
-    private Instant returnAt;
 }

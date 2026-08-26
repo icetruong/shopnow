@@ -3,7 +3,6 @@ package com.ice.inventoryservice.Service;
 import com.ice.inventoryservice.DTO.Event.*;
 import com.ice.inventoryservice.DTO.Request.Inventory.ItemReserveRequest;
 import com.ice.inventoryservice.DTO.Response.Inventory.ReleaseResponse;
-import com.ice.inventoryservice.DTO.Response.Inventory.ReserveResponseSuccess;
 import com.ice.inventoryservice.Entity.Inventory;
 import lombok.RequiredArgsConstructor;
 import org.springframework.kafka.core.KafkaTemplate;
@@ -18,7 +17,6 @@ import java.util.UUID;
 public class KafkaProducerService {
     private final KafkaTemplate<String, Object> kafkaTemplate;
     private static final String FLASH_SALE = "flash-sale-reserved";
-    private static final String RESERVED = "stock.reserved";
     private static final String RELEASE = "stock.released";
     private static final String LOW_WARNING = "stock.low_warning";
     private static final String STOCK_CHANGED = "stock.changed";
@@ -26,25 +24,6 @@ public class KafkaProducerService {
     public void publishFlashSaleEvent(FlashSaleReservedEvent event)
     {
         kafkaTemplate.send(FLASH_SALE, event.getOrderId(), event);
-    }
-
-    public void publishReservedEvent(ReserveResponseSuccess response, List<ItemReserveRequest> items)
-    {
-        ReservePayload payload = new ReservePayload(
-                response.getOrderId(),
-                response.getReservedAt(),
-                response.getExpiresAt(),
-                items
-        );
-        KafkaEvent<ReservePayload> kafkaEvent = new KafkaEvent<>(
-                UUID.randomUUID().toString(),
-                RESERVED,
-                Instant.now().toString(),
-                "1.0",
-                payload
-        );
-
-        kafkaTemplate.send(RESERVED, response.getOrderId(), kafkaEvent);
     }
 
     public void publishReleaseEvent(ReleaseResponse response, List<ItemReserveRequest> itemsKafka, String reason) {

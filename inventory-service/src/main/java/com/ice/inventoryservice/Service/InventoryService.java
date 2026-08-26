@@ -158,7 +158,6 @@ public class InventoryService {
                 expiresAt.toInstant(ZoneOffset.UTC)
         );
 
-        kafkaProducerService.publishReservedEvent(response, request.getItems());
         kafkaProducerService.publishStockChangeEvent(variantIds.stream().map(
                 UUID::toString
         ).toList());
@@ -183,14 +182,10 @@ public class InventoryService {
 
         List<Inventory> inventories = inventoryRepo.findAllByVariantIdInOrderByVariantId(variantIds);
 
-        List<ItemReserveRequest> itemsKafka = new ArrayList<>();
-
         for(Inventory inventory : inventories)
         {
             Integer qty = itemsMap.get(inventory.getVariantId());
             inventory.setReservedQty(inventory.getReservedQty() - qty);
-
-            itemsKafka.add(new ItemReserveRequest(inventory.getVariantId().toString(), qty));
         }
         stockReservationService.updateStatusRelease(stockReservations);
         inventoryRepo.saveAll(inventories);
@@ -201,7 +196,6 @@ public class InventoryService {
                 Instant.now()
         );
 
-        kafkaProducerService.publishReleaseEvent(response, itemsKafka, request.getReason().toString());
         kafkaProducerService.publishStockChangeEvent(variantIds.stream().map(
                 UUID::toString
         ).toList());

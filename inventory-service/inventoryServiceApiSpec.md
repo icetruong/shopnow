@@ -258,13 +258,13 @@ Dùng **Pessimistic Lock** — lock row cho đến khi transaction xong.
 6. Nếu đủ tất cả → UPDATE reservedQty += qty cho từng variant
 7. INSERT vào stock_reservations (orderId, variantId, qty, expiresAt = now + 15 phút)
 8. COMMIT
-9. Publish Kafka event stock.reserved
 ```
+Không publish Kafka event gì cả — Order Service gọi REST này đã biết ngay còn/hết hàng trong response 200/409.
 
 ---
 
 ### POST /internal/stock/release
-Giải phóng hàng đã reserve — gọi khi thanh toán thất bại hoặc user hủy đơn (Saga compensating).
+Giải phóng hàng đã reserve — Order Service gọi REST đồng bộ khi thanh toán thất bại hoặc user hủy đơn (Saga compensating).
 
 **Header:** `X-Internal-Token: {sharedSecret}`
 
@@ -276,7 +276,9 @@ Giải phóng hàng đã reserve — gọi khi thanh toán thất bại hoặc u
 }
 ```
 
-**Reason values:** `PAYMENT_FAILED` / `ORDER_CANCELLED` / `RESERVATION_EXPIRED`
+**Reason values:** `PAYMENT_FAILED` / `ORDER_CANCELLED`
+
+> `RESERVATION_EXPIRED` **không** đi qua endpoint này — trường hợp đó do chính Inventory Service tự phát hiện qua Scheduler (`SchedulerStockReserve`, chạy mỗi phút) và tự release nội bộ, không phải Order Service gọi REST tới đây.
 
 **Response 200**
 ```json
@@ -295,8 +297,8 @@ Giải phóng hàng đã reserve — gọi khi thanh toán thất bại hoặc u
 4. UPDATE reservedQty -= qty cho từng variant
 5. UPDATE stock_reservations SET status = RELEASED
 6. COMMIT
-7. Publish Kafka event stock.released
 ```
+Không publish Kafka event gì cả — Order Service gọi REST này đã biết kết quả ngay trong response 200, không cần thông báo lại qua Kafka.
 
 ---
 
@@ -333,6 +335,54 @@ Trừ hàng thật sự khi thanh toán thành công — chuyển từ reserved 
 8. COMMIT
 9. Nếu stockQty còn lại <= threshold → publish Kafka event stock.low_warning
 ```
+
+---
+
+### POST /internal/stock/return
+Cộng lại kho **sau khi đã deduct** — dùng khi hủy đơn đã ở trạng thái `CONFIRMED` (Order Service Case 3: user hủy đơn đã thanh toán + đã trừ kho thật). Đây là chiều ngược lại của `deduct`, **khác với `release`** (chỉ hoạt động trên bản ghi còn `RESERVED`, không xử lý được bản ghi đã `DEDUCTED`).
+
+**Header:** `X-Internal-Token: {sharedSecret}`
+
+**Request Body**
+```json
+{
+  "orderId": "order-uuid-1"
+}
+```
+
+**Response 200**
+```json
+{
+  "success":    true,
+  "orderId":    "order-uuid-1",
+  "returnedAt": "2024-01-15T10:40:00Z"
+}
+```
+
+**Response 404** — không tìm thấy bản ghi đã deduct cho orderId này
+```json
+{
+  "success":   false,
+  "errorCode": "RESERVATION_NOT_FOUND",
+  "message":   "Không tìm thấy bản ghi đã trừ kho cho đơn hàng này."
+}
+```
+
+**Logic bên trong:**
+```
+1. Tìm stock_reservations theo orderId (status = DEDUCTED)
+2. Nếu rỗng → trả 404 RESERVATION_NOT_FOUND
+3. BEGIN TRANSACTION
+4. SELECT ... FOR UPDATE các inventory row liên quan
+5. UPDATE stockQty += qty (cộng lại kho vật lý — ngược thao tác deduct)
+6. UPDATE soldQty -= qty (bỏ khỏi đã bán)
+7. INSERT vào stock_transactions (type = RETURN, qty dương, order_id, note "Hoàn kho do hủy đơn sau khi đã CONFIRMED")
+8. UPDATE stock_reservations SET status = RETURNED
+9. COMMIT
+```
+Không publish Kafka event — Order Service gọi REST này đã biết kết quả ngay trong response 200/404, giống `reserve`/`release`/`deduct`.
+
+> **Cần bổ sung 2 enum:** `StockReservationStatus` thêm giá trị `RETURNED`; `StockTransactionType` thêm giá trị `RETURN` — hiện cả 2 chưa có, cần thêm khi implement endpoint này.
 
 ---
 
@@ -581,16 +631,7 @@ Admin khởi tạo tồn kho flash sale — ghi vào Redis trước khi flash sa
 
 ## 4. KAFKA EVENTS — Consume
 
----
-
-### Consumer: payment.processed
-Khi thanh toán thành công → gọi nội bộ deduct stock.
-Khi thanh toán thất bại → gọi nội bộ release stock.
-
----
-
-### Consumer: order.cancelled
-Khi đơn bị hủy → release stock.
+Inventory Service **không consume event nào cả** — reserve/release/deduct đều do Order Service gọi REST đồng bộ trực tiếp (`POST /internal/stock/reserve|release|deduct`), không qua Kafka. Inventory Service chỉ **publish** (`stock.released` khi tự phát hiện hết hạn, `stock.low_warning`) — xem mục "Kafka Events" ở PHẦN 2.
 
 ---
 
@@ -619,6 +660,7 @@ Khi đơn bị hủy → release stock.
 | POST | /internal/stock/reserve | 🔒 Internal | — |
 | POST | /internal/stock/release | 🔒 Internal | — |
 | POST | /internal/stock/deduct | 🔒 Internal | — |
+| POST | /internal/stock/return | 🔒 Internal | — |
 | POST | /internal/stock/flash-sale/reserve | 🔒 Internal | — |
 | GET | /admin/stock | ✅ | ADMIN |
 | POST | /admin/stock/{variantId}/import | ✅ | ADMIN |
@@ -757,29 +799,13 @@ CREATE UNIQUE INDEX idx_flash_sale_stocks_unique ON flash_sale_stocks(flash_sale
 
 ## Kafka Events
 
-### Publish: stock.reserved
-```json
-{
-  "eventId":   "uuid-v4",
-  "eventType": "stock.reserved",
-  "timestamp": "2024-01-15T10:30:00Z",
-  "version":   "1.0",
-  "payload": {
-    "orderId":    "order-uuid-1",
-    "reservedAt": "2024-01-15T10:30:00Z",
-    "expiresAt":  "2024-01-15T10:45:00Z",
-    "items": [
-      { "variantId": "var-uuid-1", "qty": 2 },
-      { "variantId": "var-uuid-2", "qty": 1 }
-    ]
-  }
-}
-```
-**Consumer:** Order Service (tiến hành bước tiếp theo trong Saga — gọi Payment)
-
----
+> `stock.reserved` đã bỏ hoàn toàn — reserve giờ là REST đồng bộ (`POST /internal/stock/reserve`), Order Service biết kết quả ngay trong response, không cần event báo lại.
 
 ### Publish: stock.released
+Chỉ publish **đúng 1 trường hợp**: `SchedulerStockReserve` (chạy mỗi phút) tự phát hiện reservation quá hạn 15 phút chưa thanh toán và tự release — đây là hành động Inventory Service **tự chủ động phát hiện**, không do ai gọi REST, nên Order Service không có cách nào khác để biết ngoài lắng nghe event này.
+
+Khi Order Service tự gọi REST `POST /internal/stock/release` (do thanh toán fail hoặc user hủy đơn), **không** publish event này nữa — Order Service đã biết kết quả ngay trong response 200 rồi.
+
 ```json
 {
   "eventId":   "uuid-v4",
@@ -788,7 +814,7 @@ CREATE UNIQUE INDEX idx_flash_sale_stocks_unique ON flash_sale_stocks(flash_sale
   "version":   "1.0",
   "payload": {
     "orderId":    "order-uuid-1",
-    "reason":     "PAYMENT_FAILED",
+    "reason":     "RESERVATION_EXPIRED",
     "releasedAt": "2024-01-15T10:35:00Z",
     "items": [
       { "variantId": "var-uuid-1", "qty": 2 },
@@ -797,7 +823,7 @@ CREATE UNIQUE INDEX idx_flash_sale_stocks_unique ON flash_sale_stocks(flash_sale
   }
 }
 ```
-**Consumer:** Order Service (cập nhật order status = CANCELLED)
+**Consumer:** Order Service (cập nhật order status = CANCELLED, reason RESERVATION_EXPIRED — payment coi như bị bỏ dở vì user không thanh toán kịp trong 15 phút)
 
 ---
 

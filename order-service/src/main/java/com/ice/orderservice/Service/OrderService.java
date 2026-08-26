@@ -1,12 +1,14 @@
 package com.ice.orderservice.Service;
 
 import com.ice.orderservice.Client.CartClient;
+import com.ice.orderservice.Client.InventoryClient;
 import com.ice.orderservice.Client.PaymentClient;
 import com.ice.orderservice.Client.UserClient;
-import com.ice.orderservice.DTO.Event.Publish.OrderCancelledPayload;
-import com.ice.orderservice.DTO.Event.Publish.OrderCreatedPayload;
-import com.ice.orderservice.DTO.Event.Publish.OrderItemEvent;
-import com.ice.orderservice.DTO.Event.Publish.ShippingAddressEvent;
+import com.ice.orderservice.DTO.Event.Publish.*;
+import com.ice.orderservice.DTO.Request.Inventory.DeductRequest;
+import com.ice.orderservice.DTO.Request.Inventory.ItemReserveRequest;
+import com.ice.orderservice.DTO.Request.Inventory.ReleaseRequest;
+import com.ice.orderservice.DTO.Request.Inventory.ReserveRequest;
 import com.ice.orderservice.DTO.Request.Order.AdminUpdateStatusOrderRequest;
 import com.ice.orderservice.DTO.Request.Order.CancelledOrderRequest;
 import com.ice.orderservice.DTO.Request.Order.CreatedOrderRequest;
@@ -14,16 +16,14 @@ import com.ice.orderservice.DTO.Request.Payment.CreatePaymentRequest;
 import com.ice.orderservice.DTO.Request.Payment.RefundPaymentRequest;
 import com.ice.orderservice.DTO.Response.Cart.CartCheckoutTokenResponse;
 import com.ice.orderservice.DTO.Response.Cart.CartItemDataCheckoutTokenResponse;
+import com.ice.orderservice.DTO.Response.Inventory.DeductResponse;
+import com.ice.orderservice.DTO.Response.Inventory.ReserveResponseSuccess;
 import com.ice.orderservice.DTO.Response.Order.*;
 import com.ice.orderservice.DTO.Response.Payment.PaymentCreationResult;
 import com.ice.orderservice.DTO.Response.Payment.PaymentInternalResponse;
 import com.ice.orderservice.DTO.Response.User.AddressResponse;
 import com.ice.orderservice.Entity.*;
-import com.ice.orderservice.Enum.CurrentStep;
-import com.ice.orderservice.Enum.OrderStatus;
-import com.ice.orderservice.Enum.PaymentMethod;
-import com.ice.orderservice.Enum.PaymentStatus;
-import com.ice.orderservice.Enum.SagaStatus;
+import com.ice.orderservice.Enum.*;
 import com.ice.orderservice.Exception.InvalidStatusTransitionException;
 import com.ice.orderservice.Exception.OrderAccessDeniedException;
 import com.ice.orderservice.Exception.OrderCannotCancelException;
@@ -59,6 +59,7 @@ public class OrderService {
     private final CartClient cartClient;
     private final UserClient userClient;
     private final PaymentClient paymentClient;
+    private final InventoryClient inventoryClient;
     private final KafkaProducerService kafkaProducerService;
 
     private static final Map<OrderStatus, Set<OrderStatus>> ALLOWED_STATUS_TRANSITIONS = Map.of(
@@ -139,34 +140,77 @@ public class OrderService {
                 .build();
         orderShippingAddressRepo.save(shippingAddress);
 
+        ReserveResponseSuccess reserveResponseSuccess = inventoryClient.reserve(new ReserveRequest(
+                order.getId().toString(),
+                saveOrder.getOrderItems().stream()
+                        .map(orderItem ->
+                                new ItemReserveRequest(
+                                        orderItem.getVariantId().toString(), orderItem.getQty())
+                        )
+                        .toList()
+        ));
+
         SagaState sagaState = SagaState.builder()
                 .order(saveOrder)
                 .sagaStatus(SagaStatus.STARTED)
-                .currentStep(CurrentStep.ORDER_CREATED)
-                .completedSteps(new ArrayList<>(List.of("ORDER_CREATED")))
+                .currentStep(CurrentStep.STOCK_RESERVED)
+                .completedSteps(new ArrayList<>(List.of("ORDER_CREATED", "STOCK_RESERVED")))
                 .build();
-        sageStateRepo.save(sagaState);
 
         // TODO: gọi payment-service (POST /payments/create) khi service đã sẵn sàng — PHẢI đứng TRƯỚC publish order.created -> Done
         // - Thành công (VNPAY/MOMO): nhận paymentId + paymentUrl -> set response.paymentUrl
         // - Thành công (COD): nhận paymentId, không paymentUrl
         // - Lỗi (GATEWAY_ERROR...): ROLLBACK order/order_items/shipping/saga_state vừa tạo, trả lỗi cho client, KHÔNG publish event bên dưới
 
-        PaymentCreationResult paymentCreationResult = paymentClient.createPayment(new CreatePaymentRequest(
-                order.getId().toString(),
-                order.getOrderCode(),
-                userId,
-                order.getTotalAmount(),
-                order.getPaymentMethod(),
-                null,
-                null
-        ));
 
-        String paymentUrl = switch (paymentCreationResult)
+        String paymentUrl;
+        try
         {
-            case PaymentCreationResult.Online online -> online.response().getPaymentUrl();
-            case PaymentCreationResult.Cod cod -> null;
-        };
+            PaymentCreationResult paymentCreationResult = paymentClient.createPayment(new CreatePaymentRequest(
+                    saveOrder.getId().toString(),
+                    saveOrder.getOrderCode(),
+                    userId,
+                    saveOrder.getTotalAmount(),
+                    saveOrder.getPaymentMethod(),
+                    null,
+                    null
+            ));
+            paymentUrl = switch (paymentCreationResult)
+            {
+                case PaymentCreationResult.Online online -> online.response().getPaymentUrl();
+                case PaymentCreationResult.Cod cod -> null;
+            };
+        }
+        catch (Exception e)
+        {
+            inventoryClient.release(new ReleaseRequest(
+                    saveOrder.getId().toString(),
+                    ReasonRelease.PAYMENT_FAILED
+            ));
+            throw e;
+        }
+
+        if(saveOrder.getPaymentMethod() == PaymentMethod.COD)
+        {
+            try
+            {
+                DeductResponse deductResponse = inventoryClient.deduct(new DeductRequest(saveOrder.getId().toString()));
+                sagaState.getCompletedSteps().add("PAYMENT_PROCESSED");
+                sagaState.getCompletedSteps().add("STOCK_DEDUCTED");
+                saveOrder.setStatus(OrderStatus.CONFIRMED);
+                sagaState.setSagaStatus(SagaStatus.COMPLETED);
+            }
+            catch (Exception e)
+            {
+                inventoryClient.release(new ReleaseRequest(
+                        saveOrder.getId().toString(),
+                        ReasonRelease.PAYMENT_FAILED
+                ));
+                throw e;
+            }
+        }
+        orderRepo.save(saveOrder);
+        sageStateRepo.save(sagaState);
 
         kafkaProducerService.publishOrderCreatedEvent(new OrderCreatedPayload(
                 saveOrder.getId().toString(),
@@ -188,6 +232,28 @@ public class OrderService {
                         addressResponse.getStreetDetail()
                 )
         ));
+        if(saveOrder.getPaymentMethod() == PaymentMethod.COD)
+        {
+            kafkaProducerService.publishOrderConfirmEvent(new OrderConfirmPayload(
+                    saveOrder.getId().toString(),
+                    saveOrder.getOrderCode(),
+                    userId,
+                    new ShippingAddressEvent(
+                            addressResponse.getFullName(),
+                            addressResponse.getPhone(),
+                            addressResponse.getProvince(),
+                            addressResponse.getDistrict(),
+                            addressResponse.getWard(),
+                            addressResponse.getStreetDetail()
+                    ),
+                    saveOrder.getOrderItems().stream()
+                            .map(orderItem ->
+                                    new OrderItemEvent(
+                                            orderItem.getVariantId().toString(), orderItem.getQty())
+                            )
+                            .toList()
+            ));
+        }
 
         return new CreatedOrderResponse(
                 saveOrder.getId().toString(),
