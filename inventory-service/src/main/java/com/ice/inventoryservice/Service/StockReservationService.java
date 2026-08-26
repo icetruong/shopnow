@@ -32,6 +32,11 @@ public class StockReservationService {
         return stockReservationRepo.findAllByOrderIdAndStatus(UUID.fromString(orderId), StockReservationStatus.RESERVED);
     }
 
+    public List<StockReservation> getAllByOrderIdWithStatusDEDUCT(String orderId)
+    {
+        return stockReservationRepo.findAllByOrderIdAndStatus(UUID.fromString(orderId), StockReservationStatus.DEDUCTED);
+    }
+
     public void updateStatusRelease(List<StockReservation> stockReservations)
     {
         stockReservations.forEach(stockReservation -> stockReservation.setStatus(StockReservationStatus.RELEASED));

@@ -5,10 +5,7 @@ import com.ice.orderservice.Client.InventoryClient;
 import com.ice.orderservice.Client.PaymentClient;
 import com.ice.orderservice.Client.UserClient;
 import com.ice.orderservice.DTO.Event.Publish.*;
-import com.ice.orderservice.DTO.Request.Inventory.DeductRequest;
-import com.ice.orderservice.DTO.Request.Inventory.ItemReserveRequest;
-import com.ice.orderservice.DTO.Request.Inventory.ReleaseRequest;
-import com.ice.orderservice.DTO.Request.Inventory.ReserveRequest;
+import com.ice.orderservice.DTO.Request.Inventory.*;
 import com.ice.orderservice.DTO.Request.Order.AdminUpdateStatusOrderRequest;
 import com.ice.orderservice.DTO.Request.Order.CancelledOrderRequest;
 import com.ice.orderservice.DTO.Request.Order.CreatedOrderRequest;
@@ -33,6 +30,7 @@ import com.ice.orderservice.Repository.OrderShippingAddressRepo;
 import com.ice.orderservice.Repository.SageStateRepo;
 import com.ice.orderservice.Specification.OrderSpecification;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.jpa.domain.Specification;
@@ -49,6 +47,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class OrderService {
@@ -353,8 +352,33 @@ public class OrderService {
 
         Order savedOrder = orderRepo.save(order);
 
-        boolean needReleaseStock = sagaState.getCompletedSteps().contains(CurrentStep.STOCK_RESERVED.name())
-                || sagaState.getCompletedSteps().contains(CurrentStep.STOCK_DEDUCTED.name());
+        if(sagaState.getCompletedSteps().contains(CurrentStep.STOCK_DEDUCTED.name()))
+        {
+            // Refund (nếu có) đã gọi thành công ở trên rồi — đây là hành động không thể hoàn tác.
+            // Nếu returnStock lỗi ở bước này, KHÔNG được để exception rollback lại toàn bộ transaction,
+            // vì như vậy sẽ tạo ra tình trạng payment-service đã ghi nhận hoàn tiền nhưng order-service
+            // lại báo lỗi và giữ nguyên trạng thái cũ — chỉ log lại để xử lý thủ công.
+            try
+            {
+                inventoryClient.returnStock(new ReturnRequest(savedOrder.getId().toString()));
+            }
+            catch (Exception e)
+            {
+                log.error("Không thể hoàn kho cho order {} sau khi hủy (đã refund thành công) — cần xử lý thủ công",
+                        savedOrder.getId(), e);
+            }
+        }
+        else if (sagaState.getCompletedSteps().contains(CurrentStep.STOCK_RESERVED.name()))
+        {
+            // Chưa từng refund ở nhánh này (order còn PENDING, chưa PAYMENT_PROCESSED) — chưa có gì
+            // không thể hoàn tác xảy ra trước đó, nên để lỗi rollback toàn bộ transaction là an toàn.
+            inventoryClient.release(new ReleaseRequest(
+                    savedOrder.getId().toString(),
+                    ReasonRelease.ORDER_CANCELLED
+            ));
+        }
+
+        boolean needReleaseStock = false;
 
         List<OrderItemEvent> items = order.getOrderItems().stream()
                 .map(orderItem -> new OrderItemEvent(orderItem.getVariantId().toString(), orderItem.getQty()))

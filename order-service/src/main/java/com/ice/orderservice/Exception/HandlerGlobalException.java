@@ -121,4 +121,11 @@ public class HandlerGlobalException {
         return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
                 .body(ApiResponse.fail(ex.getMessage(), ErrorCode.INVENTORY_DEDUCT_FAILED.toString()));
     }
+
+    @ExceptionHandler(InventoryReturnFailedException.class)
+    public ResponseEntity<ApiResponse<Void>> handleInventoryReturnFail(InventoryReturnFailedException ex)
+    {
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                .body(ApiResponse.fail(ex.getMessage(), ErrorCode.INVENTORY_RETURN_FAILED.toString()));
+    }
 }

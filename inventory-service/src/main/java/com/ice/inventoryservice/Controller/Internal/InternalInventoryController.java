@@ -60,6 +60,14 @@ public class InternalInventoryController {
         );
     }
 
+    @PostMapping("/stock/return")
+    public ResponseEntity<ReturnResponse> returnOrder(@Valid @RequestBody ReturnRequest request)
+    {
+        return ResponseEntity.ok(
+                inventoryService.returnOrder(request)
+        );
+    }
+
     @PostMapping("/stock/flash-sale/reserve")
     public ResponseEntity<FlashSaleReserveResponse> flashSaleReserve(@Valid @RequestBody FlashSaleReserveRequest request) {
         return ResponseEntity.ok(flashSaleService.reserve(request));

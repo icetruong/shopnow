@@ -249,7 +249,52 @@ public class InventoryService {
                 request.getOrderId(),
                 Instant.now()
         );
+    }
 
+    @Transactional
+    public ReturnResponse returnOrder(ReturnRequest request) {
+        List<StockReservation> stockReservations = stockReservationService.getAllByOrderIdWithStatusDEDUCT(request.getOrderId());
+
+        if (stockReservations.isEmpty())
+            throw new ResourceNotFoundException("no reserved stock found for orderId", ErrorCode.RESERVATION_NOT_FOUND);
+
+        Map<UUID, Integer> itemsMap = new HashMap<>();
+        List<UUID> variantIds = new ArrayList<>();
+        for(StockReservation item: stockReservations)
+        {
+            itemsMap.put(item.getVariantId(), item.getQty());
+            variantIds.add(item.getVariantId());
+        }
+
+        List<Inventory> inventories = inventoryRepo.findAllByVariantIdInOrderByVariantId(variantIds);
+
+        for(Inventory inventory : inventories)
+        {
+            Integer qty = itemsMap.get(inventory.getVariantId());
+            inventory.setSoldQty(inventory.getSoldQty() - qty);
+            inventory.setStockQty(inventory.getStockQty() + qty);
+
+            String note = "Trả lại đơn sau khi deduct " + request.getOrderId();
+            stockTransactionService.addStockTransaction(
+                    StockTransactionType.RELEASE,
+                    note,
+                    qty,
+                    inventory.getStockQty() - qty,
+                    inventory
+            );
+        }
+        stockReservationService.updateStatusRelease(stockReservations);
+        inventoryRepo.saveAll(inventories);
+
+        kafkaProducerService.publishStockChangeEvent(variantIds.stream().map(
+                UUID::toString
+        ).toList());
+
+        return new ReturnResponse(
+                true,
+                request.getOrderId(),
+                Instant.now()
+        );
     }
 
     private InventoryResponse toInventoryResponse(Inventory inventory)
