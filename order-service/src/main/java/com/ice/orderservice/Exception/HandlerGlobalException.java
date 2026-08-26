@@ -69,7 +69,7 @@ public class HandlerGlobalException {
     @ExceptionHandler(InvalidStatusTransitionException.class)
     public ResponseEntity<ApiResponse<Void>> handleInvalidStatusTransition(InvalidStatusTransitionException ex)
     {
-        return ResponseEntity.status(HttpStatus.CONFLICT)
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                 .body(ApiResponse.fail(ex.getMessage(), ErrorCode.INVALID_STATUS_TRANSITION.toString()));
     }
 

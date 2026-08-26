@@ -1,8 +1,6 @@
 package com.ice.orderservice.Service;
 
-import com.ice.orderservice.DTO.Event.KafkaEvent;
-import com.ice.orderservice.DTO.Event.OrderCancelledPayload;
-import com.ice.orderservice.DTO.Event.OrderCreatedPayload;
+import com.ice.orderservice.DTO.Event.*;
 import lombok.RequiredArgsConstructor;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
@@ -17,6 +15,8 @@ public class KafkaProducerService {
     private final KafkaTemplate<String, Object> kafkaTemplate;
     private static final String ORDER_CREATED = "order.created";
     private static final String ORDER_CANCELLED = "order.cancelled";
+    private static final String ORDER_PAID = "order.paid";
+    private static final String ORDER_CONFIRMED = "order.confirmed";
 
     public void publishOrderCreatedEvent(OrderCreatedPayload payload)
     {
@@ -31,6 +31,19 @@ public class KafkaProducerService {
         kafkaTemplate.send(ORDER_CREATED, payload.getOrderId(), event);
     }
 
+    public void publishOrderPaidEvent(OrderPaidPayload payload)
+    {
+        KafkaEvent<OrderPaidPayload> event = new KafkaEvent<>(
+                UUID.randomUUID().toString(),
+                ORDER_PAID,
+                Instant.now().toString(),
+                "1.0",
+                payload
+        );
+
+        kafkaTemplate.send(ORDER_PAID, payload.getOrderId(), event);
+    }
+
     public void publishOrderCancelledEvent(OrderCancelledPayload payload)
     {
         KafkaEvent<OrderCancelledPayload> event = new KafkaEvent<>(
@@ -42,5 +55,18 @@ public class KafkaProducerService {
         );
 
         kafkaTemplate.send(ORDER_CANCELLED, payload.getOrderId(), event);
+    }
+
+    public void publishOrderConfirmEvent(OrderConfirmPayload payload)
+    {
+        KafkaEvent<OrderConfirmPayload> event = new KafkaEvent<>(
+                UUID.randomUUID().toString(),
+                ORDER_CONFIRMED,
+                Instant.now().toString(),
+                "1.0",
+                payload
+        );
+
+        kafkaTemplate.send(ORDER_CONFIRMED, payload.getOrderId(), event);
     }
 }

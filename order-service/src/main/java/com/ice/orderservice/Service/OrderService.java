@@ -21,6 +21,7 @@ import com.ice.orderservice.DTO.Response.User.AddressResponse;
 import com.ice.orderservice.Entity.*;
 import com.ice.orderservice.Enum.CurrentStep;
 import com.ice.orderservice.Enum.OrderStatus;
+import com.ice.orderservice.Enum.PaymentMethod;
 import com.ice.orderservice.Enum.PaymentStatus;
 import com.ice.orderservice.Enum.SagaStatus;
 import com.ice.orderservice.Exception.InvalidStatusTransitionException;
@@ -397,6 +398,7 @@ public class OrderService {
         );
     }
 
+    @Transactional
     public void updateStatusOrder(AdminUpdateStatusOrderRequest request, String orderId, String userId) {
         Order order = orderRepo.findById(UUID.fromString(orderId))
                 .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy đơn hàng"));
@@ -412,6 +414,12 @@ public class OrderService {
         }
 
         order.setStatus(newStatus);
+
+        // COD & thu tiền khi giao hàng: DELIVERED + COD -> báo payment-service đã thu tiền (chỉ phục vụ đối soát/lịch sử)
+        if (newStatus == OrderStatus.DELIVERED && order.getPaymentMethod() == PaymentMethod.COD) {
+            PaymentInternalResponse payment = paymentClient.getPaymentByOrderId(order.getId().toString());
+            paymentClient.confirmCod(payment.getPaymentId());
+        }
 
         OrderStatusHistory history = OrderStatusHistory.builder()
                 .order(order)
