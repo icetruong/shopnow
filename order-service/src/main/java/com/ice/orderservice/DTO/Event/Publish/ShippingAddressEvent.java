@@ -1,4 +1,4 @@
-package com.ice.orderservice.DTO.Event;
+package com.ice.orderservice.DTO.Event.Publish;
 
 import lombok.AllArgsConstructor;
 import lombok.Getter;

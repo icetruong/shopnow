@@ -1,4 +1,4 @@
-package com.ice.orderservice.DTO.Event;
+package com.ice.orderservice.DTO.Event.Publish;
 
 import lombok.AllArgsConstructor;
 import lombok.Getter;
@@ -11,9 +11,11 @@ import java.util.List;
 @Setter
 @AllArgsConstructor
 @NoArgsConstructor
-public class OrderCancelledPayload {
+public class OrderCreatedPayload {
     private String orderId;
-    private String reason;
-    private Boolean needReleaseStock;
+    private String orderCode;
+    private String userId;
+    private Long totalAmount;
     private List<OrderItemEvent> items;
+    private ShippingAddressEvent shippingAddress;
 }
