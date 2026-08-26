@@ -77,19 +77,39 @@ Tạo đơn hàng mới từ checkout token. Đây là điểm khởi đầu c�
    a. INSERT order (status = PENDING, payment_status = UNPAID)
    b. INSERT order_items (snapshot giá, tên, variant lúc đặt)
    c. INSERT order_shipping_address (snapshot địa chỉ)
-   d. INSERT saga_state (status = STARTED, step = ORDER_CREATED)
+4. Gọi Inventory Service (REST đồng bộ, X-Internal-Token):
+   POST /internal/stock/reserve { orderId, items: [{variantId, qty}] }
+   → Còn hàng: nhận về reservedAt, expiresAt
+   → Hết hàng (409 INSUFFICIENT_STOCK) → ROLLBACK bước 3 (chưa commit gì cả),
+     trả lỗi OUT_OF_STOCK cho client NGAY trong response này, KHÔNG tạo payment,
+     KHÔNG publish event gì cả
+5. INSERT saga_state (status = STARTED, step = STOCK_RESERVED,
+   completed_steps = ["ORDER_CREATED", "STOCK_RESERVED"])
    COMMIT
-4. Gọi Payment Service (REST đồng bộ, X-Internal-Token):
+6. Gọi Payment Service (REST đồng bộ, X-Internal-Token):
    POST /payments/create { orderId, orderCode, amount, method, returnUrl, bankCode }
    → VNPAY/MOMO: nhận về paymentId + paymentUrl
    → COD: nhận về paymentId, status = PENDING, không có paymentUrl
-   → Lỗi (GATEWAY_ERROR...) → ROLLBACK bước 3, trả lỗi cho client, KHÔNG publish event
-5. UPDATE saga_state: completed_steps += "PAYMENT_INITIATED"
-6. Publish Kafka event order.created (kèm paymentId)
-7. Trả response cho client (paymentUrl nếu online payment, hoặc message COD)
+   → Lỗi (GATEWAY_ERROR...) → gọi REST đồng bộ POST /internal/stock/release để hoàn tác
+     bước 4, ROLLBACK bước 3, trả lỗi cho client, KHÔNG publish event
+7. Nếu paymentMethod = COD (chỉ COD, không áp dụng VNPAY/MOMO):
+   a. Gọi Inventory Service (REST đồng bộ): POST /internal/stock/deduct { orderId }
+      → Thành công: completed_steps += "PAYMENT_PROCESSED", "STOCK_DEDUCTED"
+        (COD không có bước thanh toán qua cổng nên coi payment "processed" ngay tại đây)
+      → Thất bại (hiếm, race condition) → gọi REST đồng bộ POST /internal/stock/release,
+        ROLLBACK bước 3, trả lỗi cho client, KHÔNG publish event
+   b. UPDATE order status = CONFIRMED, saga_status = COMPLETED
+      (COD xong hẳn saga ngay trong request này — không cần chờ event nào nữa)
+   Nếu paymentMethod = VNPAY/MOMO: order giữ nguyên PENDING, chờ payment.processed (async)
+8. Publish Kafka event order.created (kèm paymentId)
+   Nếu COD (đã CONFIRMED ở bước 7): publish thêm order.confirmed ngay trong cùng request này
+   (Shipping/Notification xử lý như bình thường, chỉ là đến sớm hơn thay vì chờ webhook thanh toán)
+9. Trả response cho client (paymentUrl nếu online payment, hoặc message COD)
 ```
 
-**Lưu ý quan trọng:** `paymentUrl` phải lấy được **ngay tại request này** nên bước gọi Payment Service ở trên **bắt buộc là REST đồng bộ**, không phải chờ qua Kafka (Kafka là async, không kịp trả trong cùng response).
+**Lưu ý quan trọng:** Cả bước reserve stock (4) và tạo payment (6) đều **bắt buộc là REST đồng bộ** — phải biết ngay trong cùng 1 request liệu còn hàng hay không, và với online payment còn phải lấy `paymentUrl` để trả về client ngay; không thể chờ qua Kafka (Kafka là async, không kịp trả trong cùng response). Với COD, vì không có cổng thanh toán nào cần chờ, **toàn bộ saga hoàn tất ngay trong request tạo đơn** (bước 7) — khác với online phải chờ `payment.processed` đến sau.
+
+> **Vì sao reserve cũng là REST chứ không phải Kafka:** Inventory Service đã có sẵn `POST /internal/stock/reserve` dùng pessimistic lock, trả lời ngay 200 (còn hàng) hoặc 409 (hết hàng) — same pattern với `POST /payments/create`. Không có lý do phải publish `order.created` rồi chờ Inventory Service tự nghe lại để reserve async, vừa phức tạp hơn vừa không tận dụng được response đồng bộ đã có sẵn.
 
 ---
 
@@ -551,10 +571,10 @@ CREATE INDEX idx_saga_state_status ON saga_state(saga_status);
 | Bước Forward | Action | Compensating Action | Cách trigger compensating |
 |---|---|---|---|
 | 1. Create order | INSERT order PENDING | UPDATE status = CANCELLED | — |
-| 2. Reserve stock | reservedQty += qty | reservedQty -= qty (release) | Consume `stock.insufficient` / xử lý trong `order.cancelled` |
+| 2. Reserve stock | Gọi REST đồng bộ `POST /internal/stock/reserve` — biết ngay còn/hết hàng | Gọi REST đồng bộ `POST /internal/stock/release` (nếu bước sau lỗi trong cùng request) — hoặc Inventory Service tự release khi consume `order.cancelled` / `payment.processed` FAILED | REST đồng bộ, **KHÔNG** qua Kafka |
 | 3. Charge payment | Trừ tiền qua cổng TT | Refund tiền | Gọi REST đồng bộ `POST /payments/{paymentId}/refund` — **KHÔNG** qua Kafka |
-| 4. Deduct stock | stockQty -= qty | Cộng lại stockQty | Consume `stock.deduct_failed` / xử lý trong `order.cancelled` |
-| 5. Confirm order | status = CONFIRMED (chỉ sau khi có `stock.deducted`) | — (không cần undo) | — |
+| 4. Deduct stock | Online: Inventory Service tự trừ kho khi consume `payment.processed` (SUCCESS). COD: Order Service tự gọi REST đồng bộ `POST /internal/stock/deduct` ngay trong `createOrder()` (vì COD không có `payment.processed`) | Không cần undo riêng — hàng đã reserve chắc chắn trước đó nên deduct không có nhánh "hết hàng"; nếu hiếm khi fail thì gọi `POST /internal/stock/release` | Online: không qua Order Service. COD: REST đồng bộ trong `createOrder()` |
+| 5. Confirm order | Online: status = CONFIRMED ngay khi nhận `payment.processed` (SUCCESS). COD: status = CONFIRMED ngay trong `createOrder()` sau khi deduct REST thành công | — (không cần undo) | — |
 
 > **Vì sao refund là REST chứ không phải event:** Payment Service là chủ sở hữu duy nhất của trạng thái thanh toán (bảng `payments`, `refunds`). Order Service chủ động gọi refund ngay khi biết cần compensate, thay vì publish `order.cancelled` rồi để Payment Service tự suy luận có cần refund hay không — tránh 2 nguồn quyết định logic refund.
 
@@ -562,47 +582,25 @@ CREATE INDEX idx_saga_state_status ON saga_state(saga_status);
 
 ## Choreography — Order Service consume những event nào
 
+> **Đã đổi so với bản trước:** `stock.reserved` / `stock.insufficient` không còn là event nữa — reserve stock giờ là REST đồng bộ ngay trong `POST /orders` (xem PHẦN 1). `stock.deducted` / `stock.deduct_failed` / `stock.released` cũng bỏ — Inventory Service tự chủ động deduct/release ở phía nó khi consume `payment.processed`/`order.cancelled`, Order Service không cần chờ xác nhận ngược lại (hàng đã reserve chắc chắn trước đó nên deduct không có nhánh lỗi cần xử lý).
+>
+> **Đơn COD:** payment-service không bao giờ publish `payment.processed` cho COD (tiền chỉ thu thật khi giao hàng, xem `confirm-cod`), nên COD **không đi qua choreography bên dưới** — toàn bộ saga (reserve, tạo payment, deduct, confirm) chạy hết trong 1 request `createOrder()` theo kiểu REST đồng bộ (xem bước 7 ở "Flow bên trong" PHẦN 1). Phần Consume dưới đây chỉ áp dụng cho đơn online (VNPAY/MOMO).
+
 ```
-Consume: stock.reserved
-  → completed_steps += "STOCK_RESERVED"
-  → Nếu paymentMethod = COD:
-      → publish order.paid ngay (COD chưa thu tiền lúc này, không chờ payment.processed)
-      → chờ stock.deducted để chuyển CONFIRMED (giống luồng online)
-  → Nếu online (VNPAY/MOMO):
-      → paymentUrl đã có sẵn từ bước tạo order (REST đồng bộ), chờ payment.processed
-
-Consume: stock.insufficient (hết hàng khi reserve)
-  → saga_status = COMPENSATING
-  → UPDATE order status = CANCELLED (reason OUT_OF_STOCK)
-  → publish order.cancelled (needReleaseStock = false, chưa reserve nên không cần release)
-
 Consume: payment.processed (SUCCESS)
   → completed_steps += "PAYMENT_PROCESSED"
   → UPDATE order payment_status = PAID, transaction_id = payload.transactionId
-     (order.status VẪN GIỮ NGUYÊN — chưa chuyển CONFIRMED, còn chờ trừ kho thật)
-  → publish order.paid → Inventory deduct stock thật
-
-Consume: payment.processed (FAILED)
-  → saga_status = COMPENSATING
-  → publish order.cancelled (reason PAYMENT_FAILED, needReleaseStock = có STOCK_RESERVED trong completed_steps)
-  → UPDATE order status = CANCELLED
-
-Consume: stock.deducted (Inventory xác nhận trừ kho thật thành công)
-  → completed_steps += "STOCK_DEDUCTED"
   → UPDATE order status = CONFIRMED
   → saga_status = COMPLETED
   → publish order.confirmed → Shipping tạo vận đơn, Notification gửi email
+     (Inventory Service tự trừ kho thật ở phía nó khi consume event payment.processed này,
+      Order Service không gọi REST, không chờ xác nhận deduct)
 
-Consume: stock.deduct_failed (hiếm — đã reserve được nhưng lúc trừ thật lại fail)
+Consume: payment.processed (FAILED)
   → saga_status = COMPENSATING
-  → UPDATE order status = REFUNDING (nếu có PAYMENT_PROCESSED) hoặc CANCELLED (nếu COD chưa cần refund)
-  → Nếu completed_steps có PAYMENT_PROCESSED → gọi REST đồng bộ POST /payments/{paymentId}/refund
-  → publish order.cancelled (reason STOCK_DEDUCT_FAILED, needReleaseStock = true)
-
-Consume: stock.released (compensating done)
-  → completed_steps -= "STOCK_RESERVED"
-  → saga_status = COMPENSATED
-  → publish notification "Đặt hàng thất bại"
+  → UPDATE order status = CANCELLED (reason PAYMENT_FAILED)
+  → publish order.cancelled (needReleaseStock = true, vì đã reserve ở bước tạo order)
+     (Inventory Service tự release ở phía nó khi consume order.cancelled)
 
 Consume: payment.refunded (Payment Service xác nhận hoàn tiền xong)
   → UPDATE order status = REFUNDED, payment_status = REFUNDED
@@ -616,20 +614,29 @@ Consume: payment.refunded (Payment Service xác nhận hoàn tiền xong)
 
 ### Case 1 — Hết hàng khi reserve
 ```
-ORDER_CREATED → [reserve FAIL]
-Compensating cần làm:
-  • Order → CANCELLED (reason OUT_OF_STOCK)
-  • KHÔNG cần release stock (chưa reserve được)
-  • Refund? KHÔNG (chưa charge)
-  • Gửi email "Sản phẩm hết hàng"
+BEGIN TRANSACTION → INSERT order/items/shipping → [gọi REST reserve → 409 INSUFFICIENT_STOCK]
+  • ROLLBACK toàn bộ transaction — order/items/shipping chưa từng commit, không tồn tại trong DB
+  • Trả lỗi 409 OUT_OF_STOCK cho client NGAY trong response của POST /orders
+  • Không tạo payment, không publish event, không cần compensating gì thêm
+    (xử lý gọn trong 1 request đồng bộ vì reserve giờ là REST, không phải Kafka)
 ```
 
 ### Case 2 — Thanh toán thất bại
+
+**Fail ngay lúc tạo order** (bước gọi `POST /payments/create` trong cùng request thất bại):
 ```
-ORDER_CREATED → STOCK_RESERVED → [payment FAIL]
-Compensating cần làm (ngược thứ tự):
-  • Release stock (reservedQty -= qty)
+BEGIN TRANSACTION → reserve OK → [gọi payment-service FAIL]
+  • Gọi REST đồng bộ POST /internal/stock/release để hoàn tác reserve vừa làm
+  • ROLLBACK transaction local, trả lỗi cho client ngay trong response POST /orders
+  • Refund? KHÔNG (charge chưa từng thành công)
+```
+
+**Fail sau khi order đã tạo xong** (VNPAY/MOMO báo thanh toán thất bại qua `payment.processed` FAILED, tới sau):
+```
+ORDER_CREATED → STOCK_RESERVED (REST) → [payment.processed FAILED]
+Compensating cần làm:
   • Order → CANCELLED (reason PAYMENT_FAILED)
+  • Publish order.cancelled (needReleaseStock = true) → Inventory Service tự release ở phía nó
   • Refund? KHÔNG (charge đã fail, tiền chưa trừ)
   • Gửi email "Thanh toán thất bại"
 ```
@@ -715,30 +722,9 @@ Giải pháp: Scheduled Job quét saga_state
 }
 ```
 **Kafka key:** `orderId`
-**Consumers:** Inventory Service (reserve stock)
+**Consumers:** Không có consumer bắt buộc trong saga nữa — reserve stock giờ là REST đồng bộ, xảy ra **trước khi** event này được publish (xem flow `POST /orders` ở PHẦN 1). Event này chỉ mang tính thông báo, để service khác (vd Analytics) dùng nếu cần.
 
 > Payment Service **không** consume event này — payment record được tạo trước đó bằng REST đồng bộ `POST /payments/create` (xem flow `POST /orders` ở PHẦN 1), ngay trước khi publish `order.created`.
-
----
-
-### order.paid
-```json
-{
-  "eventId":   "uuid-v4",
-  "eventType": "order.paid",
-  "timestamp": "2024-01-15T10:35:00Z",
-  "version":   "1.0",
-  "payload": {
-    "orderId":   "order-uuid-1",
-    "orderCode": "SN240115001",
-    "items": [
-      { "variantId": "var-uuid-1", "qty": 2 }
-    ]
-  }
-}
-```
-**Kafka key:** `orderId`
-**Consumers:** Inventory Service (trừ kho thật — publish lại `stock.deducted` hoặc `stock.deduct_failed`)
 
 ---
 
