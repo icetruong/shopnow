@@ -72,4 +72,32 @@ public class HandlerGlobalException {
         return ResponseEntity.status(HttpStatus.CONFLICT)
                 .body(ApiResponse.fail(ex.getMessage(), ErrorCode.INVALID_STATUS_TRANSITION.toString()));
     }
+
+    @ExceptionHandler(PaymentCreationFailedException.class)
+    public ResponseEntity<ApiResponse<Void>> handlePaymentCreateFail(PaymentCreationFailedException ex)
+    {
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                .body(ApiResponse.fail(ex.getMessage(), ErrorCode.PAYMENT_CREATION_FAILED.toString()));
+    }
+
+    @ExceptionHandler(PaymentRefundFailException.class)
+    public ResponseEntity<ApiResponse<Void>> handlePaymentRefundFail(PaymentRefundFailException ex)
+    {
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                .body(ApiResponse.fail(ex.getMessage(), ErrorCode.PAYMENT_REFUND_FAILED.toString()));
+    }
+
+    @ExceptionHandler(PaymentLookupFailedException.class)
+    public ResponseEntity<ApiResponse<Void>> handlePaymentLookupFail(PaymentLookupFailedException ex)
+    {
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                .body(ApiResponse.fail(ex.getMessage(), ErrorCode.PAYMENT_LOOKUP_FAILED.toString()));
+    }
+
+    @ExceptionHandler(PaymentConfirmCodFailedException.class)
+    public ResponseEntity<ApiResponse<Void>> handlePaymentConfirmCodFail(PaymentConfirmCodFailedException ex)
+    {
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                .body(ApiResponse.fail(ex.getMessage(), ErrorCode.PAYMENT_CONFIRM_COD_FAILED.toString()));
+    }
 }

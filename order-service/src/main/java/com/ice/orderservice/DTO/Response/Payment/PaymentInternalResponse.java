@@ -13,12 +13,11 @@ import java.time.Instant;
 @Setter
 @AllArgsConstructor
 @NoArgsConstructor
-public class CreatePaymentOnlineResponse {
+public class PaymentInternalResponse {
     private String paymentId;
     private String orderId;
     private PaymentMethod method;
     private Long amount;
     private PaymentGatewayStatus status;
-    private String paymentUrl;
-    private Instant expiresAt;
+    private Instant paidAt;
 }

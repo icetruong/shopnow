@@ -1,6 +1,7 @@
 package com.ice.orderservice.Service;
 
 import com.ice.orderservice.Client.CartClient;
+import com.ice.orderservice.Client.PaymentClient;
 import com.ice.orderservice.Client.UserClient;
 import com.ice.orderservice.DTO.Event.OrderCancelledPayload;
 import com.ice.orderservice.DTO.Event.OrderCreatedPayload;
@@ -9,9 +10,13 @@ import com.ice.orderservice.DTO.Event.ShippingAddressEvent;
 import com.ice.orderservice.DTO.Request.Order.AdminUpdateStatusOrderRequest;
 import com.ice.orderservice.DTO.Request.Order.CancelledOrderRequest;
 import com.ice.orderservice.DTO.Request.Order.CreatedOrderRequest;
+import com.ice.orderservice.DTO.Request.Payment.CreatePaymentRequest;
+import com.ice.orderservice.DTO.Request.Payment.RefundPaymentRequest;
 import com.ice.orderservice.DTO.Response.Cart.CartCheckoutTokenResponse;
 import com.ice.orderservice.DTO.Response.Cart.CartItemDataCheckoutTokenResponse;
 import com.ice.orderservice.DTO.Response.Order.*;
+import com.ice.orderservice.DTO.Response.Payment.PaymentCreationResult;
+import com.ice.orderservice.DTO.Response.Payment.PaymentInternalResponse;
 import com.ice.orderservice.DTO.Response.User.AddressResponse;
 import com.ice.orderservice.Entity.*;
 import com.ice.orderservice.Enum.CurrentStep;
@@ -53,6 +58,7 @@ public class OrderService {
     private final SageStateRepo sageStateRepo;
     private final CartClient cartClient;
     private final UserClient userClient;
+    private final PaymentClient paymentClient;
     private final KafkaProducerService kafkaProducerService;
 
     private static final Map<OrderStatus, Set<OrderStatus>> ALLOWED_STATUS_TRANSITIONS = Map.of(
@@ -141,11 +147,26 @@ public class OrderService {
                 .build();
         sageStateRepo.save(sagaState);
 
-        // TODO: gọi payment-service (POST /payments/create) khi service đã sẵn sàng — PHẢI đứng TRƯỚC publish order.created
+        // TODO: gọi payment-service (POST /payments/create) khi service đã sẵn sàng — PHẢI đứng TRƯỚC publish order.created -> Done
         // - Thành công (VNPAY/MOMO): nhận paymentId + paymentUrl -> set response.paymentUrl
         // - Thành công (COD): nhận paymentId, không paymentUrl
         // - Lỗi (GATEWAY_ERROR...): ROLLBACK order/order_items/shipping/saga_state vừa tạo, trả lỗi cho client, KHÔNG publish event bên dưới
-        String paymentUrl = null;
+
+        PaymentCreationResult paymentCreationResult = paymentClient.createPayment(new CreatePaymentRequest(
+                order.getId().toString(),
+                order.getOrderCode(),
+                userId,
+                order.getTotalAmount(),
+                order.getPaymentMethod(),
+                null,
+                null
+        ));
+
+        String paymentUrl = switch (paymentCreationResult)
+        {
+            case PaymentCreationResult.Online online -> online.response().getPaymentUrl();
+            case PaymentCreationResult.Cod cod -> null;
+        };
 
         kafkaProducerService.publishOrderCreatedEvent(new OrderCreatedPayload(
                 saveOrder.getId().toString(),
@@ -240,8 +261,15 @@ public class OrderService {
         if (sagaState.getCompletedSteps().contains(CurrentStep.PAYMENT_PROCESSED.name()))
         {
             order.setStatus(OrderStatus.REFUNDING);
-            // TODO: gọi paymentClient.refund(paymentId, amount, reason) khi PaymentClient sẵn sàng
             // REFUNDING -> REFUNDED sẽ do 1 @KafkaListener riêng lắng nghe event "payment.refunded" xử lý, không phải ở đây
+
+            PaymentInternalResponse payment = paymentClient.getPaymentByOrderId(order.getId().toString());
+
+            paymentClient.refundPayment(new RefundPaymentRequest(
+                    order.getId().toString(),
+                    order.getTotalAmount(),
+                    request.getReason()
+            ), payment.getPaymentId());
         }
         else
         {
