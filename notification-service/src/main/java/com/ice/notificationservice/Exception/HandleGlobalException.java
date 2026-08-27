@@ -38,4 +38,28 @@ public class HandleGlobalException {
         return ResponseEntity.badRequest()
                 .body(ApiResponse.fail(message, "INVALID_REQUEST"));
     }
+
+    @ExceptionHandler(NotificationNotFoundException.class)
+    public ResponseEntity<ApiResponse<Void>> handleNotificationNotFound(NotificationNotFoundException ex) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(ApiResponse.fail(ex.getMessage(), ErrorCode.NOTIFICATION_NOT_FOUND.toString()));
+    }
+
+    @ExceptionHandler(TemplateNotFoundException.class)
+    public ResponseEntity<ApiResponse<Void>> handleTemplateNotFound(TemplateNotFoundException ex) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(ApiResponse.fail(ex.getMessage(), ErrorCode.TEMPLATE_NOT_FOUND.toString()));
+    }
+
+    @ExceptionHandler(DeviceTokenInvalidException.class)
+    public ResponseEntity<ApiResponse<Void>> handleDeviceTokenInvalid(DeviceTokenInvalidException ex) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(ApiResponse.fail(ex.getMessage(), ErrorCode.DEVICE_TOKEN_INVALID.toString()));
+    }
+
+    @ExceptionHandler(ProviderException.class)
+    public ResponseEntity<ApiResponse<Void>> handleProviderError(ProviderException ex) {
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                .body(ApiResponse.fail(ex.getMessage(), ErrorCode.PROVIDER_ERROR.toString()));
+    }
 }
