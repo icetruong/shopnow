@@ -1,4 +1,4 @@
-package com.ice.orderservice.Config;
+package com.ice.shippingservice.Config;
 
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;

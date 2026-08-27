@@ -369,6 +369,8 @@ SHIPPING   → DELIVERED
 DELIVERED  → COMPLETED
 ```
 
+> Các transition ngang `CONFIRMED→PROCESSING→SHIPPING→DELIVERED` **thường chạy tự động** qua listener `shipment.updated` (Shipping Service) — xem PHẦN 3 mục "Tiến trình logistics". Endpoint này là đường can thiệp tay của admin cho cùng bộ transition đó (khi vận đơn lỗi, hoặc bán hàng không qua nhà vận chuyển). 2 nguồn không xung đột vì cùng validate 1 chiều mũi tên.
+
 > **`PENDING→CONFIRMED` và `*→CANCELLED` KHÔNG được phép qua endpoint này** — dù state machine ở mục 5 có vẽ 2 mũi tên đó, chúng đòi hỏi xác thực nghiệp vụ (đã thanh toán/trừ kho thật chưa; đã refund/release kho chưa) mà endpoint generic PATCH status này không có. 2 transition đó chỉ được phép xảy ra qua đúng luồng chuyên biệt:
 > - `PENDING→CONFIRMED`: nội bộ — `createOrder()` (COD) hoặc `PaymentProcessedListener` (online, sau khi có `payment.processed` SUCCESS thật).
 > - `*→CANCELLED`: `POST /orders/{orderId}/cancel` (user) hoặc `POST /admin/orders/{orderId}/cancel` (admin) — xem ngay bên dưới.
@@ -442,6 +444,17 @@ REFUNDED    — Đã hoàn tiền xong
 ```
 
 **Quy tắc chuyển trạng thái:** Chỉ cho phép chuyển theo đúng chiều mũi tên. Mọi chuyển trạng thái sai phải bị từ chối (validate trong Service). Riêng `PENDING→CONFIRMED` và `*→CANCELLED` **không** đi qua `PATCH /admin/orders/{orderId}/status` — xem ghi chú ở mục đó.
+
+**Nguồn của mỗi transition:**
+| Transition | Nguồn |
+|---|---|
+| `PENDING → CONFIRMED` | `createOrder()` (COD) hoặc `PaymentProcessedListener` (online) |
+| `PENDING → CANCELLED` | `POST /orders/{orderId}/cancel`, `POST /admin/orders/{orderId}/cancel`, `PaymentProcessedListener` (FAILED), `StockEventListener` (`stock.released` RESERVATION_EXPIRED) |
+| `CONFIRMED → CANCELLED` | `POST /orders/{orderId}/cancel`, `POST /admin/orders/{orderId}/cancel` |
+| `CONFIRMED → PROCESSING` | `ShipmentUpdatedListener` (`shipment.updated` = READY_TO_PICK) hoặc `PATCH /admin/orders/{orderId}/status` |
+| `PROCESSING → SHIPPING` | `ShipmentUpdatedListener` (PICKED_UP) hoặc `PATCH /admin/orders/{orderId}/status` |
+| `SHIPPING → DELIVERED` | `ShipmentUpdatedListener` (DELIVERED) hoặc `PATCH /admin/orders/{orderId}/status` |
+| `DELIVERED → COMPLETED` | User xác nhận đã nhận, hoặc scheduled job auto sau 7 ngày, hoặc `PATCH /admin/orders/{orderId}/status` |
 
 **COD & thu tiền khi giao hàng:** Khi order chuyển sang `DELIVERED` với `paymentMethod = COD`, Order Service gọi REST nội bộ `PATCH /internal/payments/{paymentId}/confirm-cod` bên Payment Service để đánh dấu đã thu tiền (chỉ phục vụ đối soát/lịch sử, không ảnh hưởng đến saga vì đơn COD đã `CONFIRMED` từ trước khi giao).
 
@@ -668,7 +681,60 @@ Consume: payment.refunded (Payment Service xác nhận hoàn tiền xong)
   → UPDATE order status = REFUNDED, payment_status = REFUNDED
   → saga_status = COMPENSATED
   → publish notification "Đã hoàn tiền"
+
+Consume: shipment.updated (Shipping Service — mọi lần trạng thái vận đơn đổi)
+  → map shipment.status → order.status theo bảng ở "Tiến trình logistics" bên dưới
+  → chỉ áp dụng cho đơn đã CONFIRMED; KHÔNG đụng saga_state (saga đã COMPLETED từ trước)
+  → ghi order_status_history với changed_by = SYSTEM
+  → nếu chuyển sang DELIVERED và payment_method = COD:
+      gọi REST đồng bộ PATCH /internal/payments/{paymentId}/confirm-cod (Payment Service)
 ```
+
+---
+
+## Tiến trình logistics — consume `shipment.updated`
+
+Sau khi `order.confirmed` được publish, **Shipping Service** sở hữu toàn bộ vòng đời vận đơn và phát event `shipment.updated` mỗi lần trạng thái đổi (từ webhook GHN/GHTK). Order Service lắng nghe event này để đẩy `order.status` đi tiếp trên nhánh ngang của state machine — **đây là nguồn tự động cho `CONFIRMED → PROCESSING → SHIPPING → DELIVERED`**, song song với `PATCH /admin/orders/{orderId}/status` (admin làm tay).
+
+**Listener:**
+```java
+@KafkaListener(topics = "shipment.updated", groupId = "order-service")
+```
+Message là JSON của `KafkaEvent<ShipmentUpdatedPayload>` — parse y hệt các listener khác (`objectMapper.readValue(message, new TypeReference<KafkaEvent<ShipmentUpdatedPayload>>(){})`).
+
+**`ShipmentUpdatedPayload`:**
+```json
+{
+  "orderId":       "order-uuid-1",
+  "shipmentId":    "ship-uuid-1",
+  "trackingCode":  "GHN123456789",
+  "carrier":       "GHN",
+  "status":        "IN_TRANSIT",
+  "description":   "Đang giao hàng",
+  "estimatedDate": "2024-01-17"
+}
+```
+
+**Idempotency:** check `processed:event:{eventId}` (Redis, TTL 24h) như mọi consumer khác.
+
+**Map `shipment.status` → `order.status`:**
+
+| shipment.status | Hành động phía Order | Ghi chú |
+|---|---|---|
+| `READY_TO_PICK` | `CONFIRMED → PROCESSING` | Vận đơn đã tạo, shop chuẩn bị hàng |
+| `PICKED_UP` | `PROCESSING → SHIPPING` | Nhà vận chuyển đã lấy hàng |
+| `IN_TRANSIT` | giữ `SHIPPING` | Chỉ ghi `order_status_history`, không đổi status |
+| `DELIVERED` | `SHIPPING → DELIVERED` | + nếu `payment_method = COD` → gọi `PATCH /internal/payments/{paymentId}/confirm-cod` |
+| `FAILED` / `RETURNED` | giữ nguyên status | Ghi history + alert admin xử lý tay (hoàn hàng / hoàn tiền) |
+| `CANCELLED` | bỏ qua | Order đã tự `CANCELLED` qua luồng hủy của nó rồi (đây chỉ là hệ quả) |
+
+**Quy tắc an toàn:**
+- Chỉ chấp nhận transition **đúng chiều** state machine. Event tới trễ / trùng / lùi bước (vd đang `SHIPPING` nhận lại `READY_TO_PICK`) → **bỏ qua**, không lỗi.
+- Không đụng `saga_state` (saga của đơn đã `COMPLETED` từ lúc `CONFIRMED`).
+- Không bao giờ suy ra `CANCELLED` hay `REFUNDING` từ event này.
+- `changed_by = SYSTEM` trong `order_status_history`.
+
+> `PATCH /admin/orders/{orderId}/status` vẫn giữ nguyên tác dụng — admin có thể ép trạng thái khi vận đơn lỗi hoặc khi cần can thiệp. 2 nguồn (event + admin) cùng đi trên 1 bộ transition ngang hợp lệ, nên không xung đột: cái nào tới trước và hợp lệ thì thắng, cái sau thành no-op.
 
 ---
 

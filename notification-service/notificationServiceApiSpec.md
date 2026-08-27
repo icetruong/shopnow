@@ -1,0 +1,637 @@
+# Notification Service — API Specification & Database Schema
+
+---
+
+## Base URL
+```
+http://localhost:8088/api/v1
+```
+
+## Vai trò
+Notification Service là **consumer thuần túy** — nó lắng nghe hầu hết các Kafka event trong hệ thống và gửi thông báo qua nhiều kênh (Email, SMS, Push notification). Đây là service ít expose REST API nhất, chủ yếu hoạt động ngầm.
+
+## Đặc điểm kiến trúc
+- **Chủ yếu consume Kafka**, ít REST endpoint
+- Dùng **template** cho từng loại thông báo
+- Gửi **async** qua queue nội bộ (không block Kafka consumer)
+- Retry khi gửi fail
+- Lưu lịch sử để user xem lại (notification center)
+
+---
+
+# PHẦN 1 — KAFKA CONSUMERS (phần chính)
+
+---
+
+## Bảng mapping Event → Notification
+
+| Kafka Event | Kênh gửi | Nội dung |
+|---|---|---|
+| `user.registered` | Email | Email chào mừng + xác thực tài khoản |
+| `user.password_reset_requested` | Email | Link đặt lại mật khẩu |
+| `order.created` | Push | "Đơn hàng đang được xử lý" |
+| `order.confirmed` | Email + Push | Email xác nhận đơn + biên lai |
+| `order.cancelled` | Email + Push | "Đơn hàng đã bị hủy" |
+| `payment.processed` (SUCCESS) | Email + SMS | Biên lai thanh toán |
+| `payment.processed` (FAILED) | Push | "Thanh toán thất bại, thử lại" |
+| `payment.refunded` | Email | "Đã hoàn tiền" |
+| `shipment.updated` (IN_TRANSIT) | Push | "Đơn hàng đang được giao" |
+| `shipment.updated` (DELIVERED) | Push + SMS | "Đơn hàng đã giao thành công" |
+| `stock.low_warning` | Email (admin) | Cảnh báo sắp hết hàng |
+| `promotion.flash_sale_starting` | Push (broadcast) | "Flash sale sắp bắt đầu!" |
+
+---
+
+## Consumer flow chung
+
+```
+Kafka event đến
+  │
+  ├─ 1. Idempotency check: processed:event:{eventId} tồn tại?
+  │     └─ Có → skip
+  │
+  ├─ 2. Xác định loại notification cần gửi (theo eventType)
+  │
+  ├─ 3. Lấy thông tin người nhận
+  │     └─ Gọi User Service GET /internal/users/{userId} lấy email/phone
+  │     └─ Hoặc dùng data có sẵn trong event payload
+  │
+  ├─ 4. Render template với data từ event
+  │
+  ├─ 5. Đẩy vào internal queue (async, không block consumer)
+  │
+  ├─ 6. INSERT notification record (status = PENDING)
+  │
+  └─ 7. SET processed:event:{eventId}
+  
+Worker xử lý queue:
+  │
+  ├─ Gửi qua provider (Email/SMS/Push)
+  ├─ Thành công → UPDATE status = SENT
+  └─ Fail → retry (tối đa 3 lần) → nếu vẫn fail → status = FAILED
+```
+
+---
+
+# PHẦN 2 — REST API ENDPOINTS
+
+---
+
+## 1. NOTIFICATION CENTER — Thông báo trong app
+
+---
+
+### GET /notifications
+Lấy danh sách thông báo của user (chuông thông báo trong app).
+
+**Header:** `Authorization: Bearer {accessToken}`
+
+**Query Params**
+```
+page   = 0
+size   = 20
+isRead = false    (filter chưa đọc, optional)
+type   = ORDER    (ORDER | PAYMENT | SHIPMENT | PROMOTION | SYSTEM, optional)
+```
+
+**Response 200**
+```json
+{
+  "success": true,
+  "data": {
+    "content": [
+      {
+        "notificationId": "noti-uuid-1",
+        "type":           "SHIPMENT",
+        "title":          "Đơn hàng đang được giao",
+        "body":           "Đơn SN240115001 của bạn đang trên đường giao đến.",
+        "imageUrl":       "https://storage.shopnow.com/products/ao-polo/thumb.jpg",
+        "actionUrl":      "/orders/order-uuid-1",
+        "isRead":         false,
+        "createdAt":      "2024-01-17T09:00:00Z"
+      },
+      {
+        "notificationId": "noti-uuid-2",
+        "type":           "ORDER",
+        "title":          "Đặt hàng thành công",
+        "body":           "Đơn SN240115001 đã được xác nhận.",
+        "imageUrl":       null,
+        "actionUrl":      "/orders/order-uuid-1",
+        "isRead":         true,
+        "createdAt":      "2024-01-15T10:31:00Z"
+      }
+    ],
+    "page":          0,
+    "totalElements": 15,
+    "unreadCount":   3
+  }
+}
+```
+
+---
+
+### GET /notifications/unread-count
+Lấy số thông báo chưa đọc (hiển thị badge trên chuông).
+
+**Response 200**
+```json
+{
+  "success": true,
+  "data": {
+    "unreadCount": 3
+  }
+}
+```
+
+---
+
+### PATCH /notifications/{notificationId}/read
+Đánh dấu 1 thông báo đã đọc.
+
+**Response 200**
+```json
+{
+  "success": true,
+  "message": "Đã đánh dấu đã đọc."
+}
+```
+
+---
+
+### PATCH /notifications/read-all
+Đánh dấu tất cả đã đọc.
+
+**Response 200**
+```json
+{
+  "success": true,
+  "message": "Đã đánh dấu tất cả đã đọc."
+}
+```
+
+---
+
+### DELETE /notifications/{notificationId}
+Xóa 1 thông báo.
+
+**Response 200**
+```json
+{
+  "success": true,
+  "message": "Đã xóa thông báo."
+}
+```
+
+---
+
+## 2. DEVICE TOKEN — Đăng ký thiết bị nhận push
+
+---
+
+### POST /notifications/devices
+Client đăng ký device token (FCM token) để nhận push notification.
+
+**Header:** `Authorization: Bearer {accessToken}`
+
+**Request Body**
+```json
+{
+  "deviceToken": "fcm-token-xxx...",
+  "platform":    "ANDROID",
+  "deviceName":  "Samsung Galaxy S23"
+}
+```
+
+**platform values:** `ANDROID` / `IOS` / `WEB`
+
+**Response 200**
+```json
+{
+  "success": true,
+  "message": "Đã đăng ký thiết bị nhận thông báo."
+}
+```
+
+---
+
+### DELETE /notifications/devices/{deviceToken}
+Hủy đăng ký thiết bị (khi logout).
+
+**Response 200**
+```json
+{
+  "success": true,
+  "message": "Đã hủy đăng ký thiết bị."
+}
+```
+
+---
+
+## 3. PREFERENCES — Cài đặt nhận thông báo
+
+---
+
+### GET /notifications/preferences
+Lấy cài đặt nhận thông báo của user.
+
+**Response 200**
+```json
+{
+  "success": true,
+  "data": {
+    "email": {
+      "orderUpdates":  true,
+      "promotions":    true,
+      "paymentReceipt":true
+    },
+    "sms": {
+      "orderUpdates":  false,
+      "deliveryAlert": true
+    },
+    "push": {
+      "orderUpdates":  true,
+      "promotions":    true,
+      "flashSale":     true
+    }
+  }
+}
+```
+
+---
+
+### PUT /notifications/preferences
+Cập nhật cài đặt nhận thông báo.
+
+**Request Body:** Giống response trên, các field optional.
+
+**Response 200**
+```json
+{
+  "success": true,
+  "message": "Đã cập nhật cài đặt thông báo."
+}
+```
+
+**Lưu ý:** Trước khi gửi bất kỳ notification nào, phải check preference của user. Nếu user tắt promotions → không gửi email/push khuyến mãi.
+
+---
+
+## 4. ADMIN — Gửi thông báo thủ công
+
+---
+
+### POST /admin/notifications/broadcast
+Gửi thông báo hàng loạt (marketing, thông báo hệ thống).
+
+**Header:** `Authorization: Bearer {accessToken}` *(ROLE_ADMIN)*
+
+**Request Body**
+```json
+{
+  "channel":    "PUSH",
+  "target":     "ALL",
+  "title":      "Flash Sale 12.12 sắp bắt đầu!",
+  "body":       "Giảm giá đến 50% toàn bộ sản phẩm. Nhanh tay!",
+  "imageUrl":   "https://storage.shopnow.com/banners/flash-sale.jpg",
+  "actionUrl":  "/flash-sale",
+  "scheduleAt": "2024-12-12T00:00:00Z"
+}
+```
+
+**target values:** `ALL` / `SEGMENT` (theo nhóm user)
+**scheduleAt:** optional, nếu có thì hẹn giờ gửi
+
+**Response 200**
+```json
+{
+  "success": true,
+  "data": {
+    "broadcastId":   "bc-uuid-1",
+    "estimatedReach":15000,
+    "status":        "SCHEDULED"
+  }
+}
+```
+
+---
+
+### GET /admin/notifications/history
+Lịch sử gửi notification, thống kê tỉ lệ gửi thành công.
+
+**Query Params**
+```
+page      = 0
+size      = 20
+channel   = EMAIL
+status    = SENT
+startDate = 2024-01-01
+```
+
+**Response 200**
+```json
+{
+  "success": true,
+  "data": {
+    "content": [
+      {
+        "notificationId": "noti-uuid-1",
+        "channel":        "EMAIL",
+        "type":           "ORDER",
+        "recipient":      "user@example.com",
+        "status":         "SENT",
+        "sentAt":         "2024-01-15T10:31:00Z"
+      }
+    ],
+    "stats": {
+      "totalSent":   1250,
+      "totalFailed": 12,
+      "successRate": 99.05
+    }
+  }
+}
+```
+
+---
+
+## 5. ERROR CODES
+
+| Code | HTTP | Ý nghĩa |
+|------|------|---------|
+| `NOTIFICATION_NOT_FOUND` | 404 | Không tìm thấy thông báo |
+| `DEVICE_TOKEN_INVALID` | 400 | FCM token không hợp lệ |
+| `PROVIDER_ERROR` | 502 | Lỗi từ nhà cung cấp email/SMS/push |
+| `TEMPLATE_NOT_FOUND` | 404 | Không tìm thấy template |
+
+---
+
+## 6. TỔNG HỢP ENDPOINTS
+
+| Method | Endpoint | Auth | Role |
+|--------|----------|------|------|
+| GET | /notifications | ✅ | USER |
+| GET | /notifications/unread-count | ✅ | USER |
+| PATCH | /notifications/{id}/read | ✅ | USER |
+| PATCH | /notifications/read-all | ✅ | USER |
+| DELETE | /notifications/{id} | ✅ | USER |
+| POST | /notifications/devices | ✅ | USER |
+| DELETE | /notifications/devices/{token} | ✅ | USER |
+| GET | /notifications/preferences | ✅ | USER |
+| PUT | /notifications/preferences | ✅ | USER |
+| POST | /admin/notifications/broadcast | ✅ | ADMIN |
+| GET | /admin/notifications/history | ✅ | ADMIN |
+
+---
+
+---
+
+# PHẦN 3 — DATABASE SCHEMA
+
+---
+
+## Bảng: notifications
+
+Lưu tất cả thông báo đã gửi (cho notification center + audit).
+
+| Column | Type | Constraint | Ghi chú |
+|--------|------|-----------|---------|
+| id | UUID | PK, DEFAULT uuid_generate_v4() | |
+| user_id | UUID | NOT NULL | Người nhận |
+| channel | VARCHAR(20) | NOT NULL | EMAIL / SMS / PUSH / IN_APP |
+| type | VARCHAR(20) | NOT NULL | ORDER / PAYMENT / SHIPMENT / PROMOTION / SYSTEM |
+| title | VARCHAR(255) | NOT NULL | |
+| body | TEXT | NOT NULL | |
+| image_url | TEXT | NULLABLE | |
+| action_url | VARCHAR(500) | NULLABLE | Link khi bấm vào notification |
+| recipient | VARCHAR(255) | NULLABLE | Email/phone thực tế đã gửi |
+| status | VARCHAR(20) | NOT NULL, DEFAULT 'PENDING' | PENDING / SENT / FAILED / READ |
+| is_read | BOOLEAN | NOT NULL, DEFAULT FALSE | Chỉ áp dụng cho IN_APP |
+| retry_count | INT | NOT NULL, DEFAULT 0 | |
+| ref_event_id | UUID | NULLABLE | eventId của Kafka event nguồn |
+| sent_at | TIMESTAMP | NULLABLE | |
+| created_at | TIMESTAMP | NOT NULL, DEFAULT NOW() | |
+
+**Index:**
+```sql
+CREATE INDEX idx_notifications_user_id ON notifications(user_id);
+CREATE INDEX idx_notifications_user_id_is_read ON notifications(user_id, is_read)
+    WHERE channel = 'IN_APP';
+CREATE INDEX idx_notifications_status ON notifications(status);
+CREATE INDEX idx_notifications_created_at ON notifications(created_at DESC);
+```
+
+---
+
+## Bảng: device_tokens
+
+Lưu FCM token của thiết bị để gửi push notification.
+
+| Column | Type | Constraint | Ghi chú |
+|--------|------|-----------|---------|
+| id | UUID | PK, DEFAULT uuid_generate_v4() | |
+| user_id | UUID | NOT NULL | |
+| device_token | TEXT | NOT NULL, UNIQUE | FCM token |
+| platform | VARCHAR(20) | NOT NULL | ANDROID / IOS / WEB |
+| device_name | VARCHAR(100) | NULLABLE | |
+| is_active | BOOLEAN | NOT NULL, DEFAULT TRUE | |
+| last_used_at | TIMESTAMP | NULLABLE | |
+| created_at | TIMESTAMP | NOT NULL, DEFAULT NOW() | |
+
+**Index:**
+```sql
+CREATE UNIQUE INDEX idx_device_tokens_token ON device_tokens(device_token);
+CREATE INDEX idx_device_tokens_user_id ON device_tokens(user_id);
+```
+
+**Lưu ý:** 1 user có thể có nhiều device token (điện thoại + máy tính + tablet). Gửi push đến tất cả device active của user. Khi FCM báo token invalid → set is_active = false.
+
+---
+
+## Bảng: notification_preferences
+
+Cài đặt nhận thông báo của từng user.
+
+| Column | Type | Constraint | Ghi chú |
+|--------|------|-----------|---------|
+| id | UUID | PK, DEFAULT uuid_generate_v4() | |
+| user_id | UUID | NOT NULL, UNIQUE | |
+| email_order_updates | BOOLEAN | NOT NULL, DEFAULT TRUE | |
+| email_promotions | BOOLEAN | NOT NULL, DEFAULT TRUE | |
+| email_payment_receipt | BOOLEAN | NOT NULL, DEFAULT TRUE | |
+| sms_order_updates | BOOLEAN | NOT NULL, DEFAULT FALSE | |
+| sms_delivery_alert | BOOLEAN | NOT NULL, DEFAULT TRUE | |
+| push_order_updates | BOOLEAN | NOT NULL, DEFAULT TRUE | |
+| push_promotions | BOOLEAN | NOT NULL, DEFAULT TRUE | |
+| push_flash_sale | BOOLEAN | NOT NULL, DEFAULT TRUE | |
+| updated_at | TIMESTAMP | NOT NULL, DEFAULT NOW() | |
+
+**Index:**
+```sql
+CREATE UNIQUE INDEX idx_notification_preferences_user_id ON notification_preferences(user_id);
+```
+
+---
+
+## Bảng: notification_templates
+
+Template cho từng loại thông báo (dễ sửa nội dung không cần deploy lại code).
+
+| Column | Type | Constraint | Ghi chú |
+|--------|------|-----------|---------|
+| id | UUID | PK, DEFAULT uuid_generate_v4() | |
+| code | VARCHAR(50) | NOT NULL, UNIQUE | VD: ORDER_CONFIRMED_EMAIL |
+| channel | VARCHAR(20) | NOT NULL | EMAIL / SMS / PUSH |
+| subject | VARCHAR(255) | NULLABLE | Tiêu đề (email) |
+| body_template | TEXT | NOT NULL | Nội dung có placeholder {{orderCode}} |
+| is_active | BOOLEAN | NOT NULL, DEFAULT TRUE | |
+| created_at | TIMESTAMP | NOT NULL, DEFAULT NOW() | |
+| updated_at | TIMESTAMP | NOT NULL, DEFAULT NOW() | |
+
+**Ví dụ template:**
+```
+code:    ORDER_CONFIRMED_EMAIL
+channel: EMAIL
+subject: Đơn hàng {{orderCode}} đã được xác nhận
+body:    Xin chào {{userName}}, đơn hàng {{orderCode}} trị giá {{totalAmount}}đ
+         đã được xác nhận và đang được chuẩn bị. Cảm ơn bạn đã mua sắm!
+```
+
+**Index:**
+```sql
+CREATE UNIQUE INDEX idx_notification_templates_code ON notification_templates(code);
+```
+
+---
+
+## Redis Keys — Notification Service
+
+| Key pattern | Value | TTL | Mục đích |
+|-------------|-------|-----|---------|
+| `processed:event:{eventId}` | `"1"` | 24 giờ | Idempotency Kafka consumer |
+| `noti:unread:{userId}` | INT | Không TTL | Cache số thông báo chưa đọc |
+| `noti:ratelimit:{userId}:{type}` | INT | 1 giờ | Chống spam (giới hạn số noti/giờ) |
+
+---
+
+# PHẦN 4 — TÍCH HỢP PROVIDER
+
+---
+
+## Email — Options
+
+| Provider | Ưu điểm | Dùng khi |
+|---|---|---|
+| **SMTP (Gmail)** | Miễn phí, dễ setup | Học tập, demo |
+| **SendGrid** | 100 email/ngày free, có template | Production nhỏ |
+| **AWS SES** | Rẻ, scale tốt | Production lớn |
+
+**Với project học tập:** Dùng `JavaMailSender` + SMTP Gmail là đủ. Tạo App Password trong Gmail.
+
+```
+Cấu hình SMTP Gmail:
+  host: smtp.gmail.com
+  port: 587
+  username: your-email@gmail.com
+  password: {app-password}   (KHÔNG phải mật khẩu Gmail thường)
+  starttls: enabled
+```
+
+---
+
+## SMS — Options
+
+| Provider | Ghi chú |
+|---|---|
+| **Twilio** | Quốc tế, có free trial |
+| **eSMS / SpeedSMS** | Việt Nam, cần đăng ký brandname |
+| **Firebase (thay thế)** | Nếu không có SMS, dùng push thay |
+
+**Với project học tập:** SMS tốn phí thật, nên có thể **mock** — chỉ log ra console hoặc lưu DB, không gửi thật. Vẫn giữ đầy đủ code flow để demo được.
+
+---
+
+## Push Notification — Firebase Cloud Messaging (FCM)
+
+```
+FCM là lựa chọn chuẩn cho push notification (miễn phí):
+
+Flow:
+1. Client (app/web) đăng ký FCM token → POST /notifications/devices
+2. Khi cần push → dùng Firebase Admin SDK
+3. Gửi message đến device token
+4. FCM đẩy notification đến thiết bị
+
+Gửi đến nhiều device của 1 user:
+  → Lấy tất cả device_tokens active của user
+  → Gửi multicast message
+
+Xử lý token hết hạn:
+  → FCM trả về lỗi UNREGISTERED
+  → Set device_token.is_active = false
+```
+
+---
+
+# PHẦN 5 — CÁC PATTERN QUAN TRỌNG
+
+---
+
+## Async processing — không block Kafka consumer
+
+```
+Vấn đề: Nếu gửi email trực tiếp trong Kafka consumer
+        → gửi email chậm (2-3s) → consumer bị chậm
+        → tồn đọng message trong Kafka
+
+Giải pháp:
+  Kafka consumer chỉ làm việc nhẹ:
+    1. Nhận event
+    2. INSERT notification record (PENDING)
+    3. Đẩy vào internal async queue (@Async hoặc TaskExecutor)
+    4. Commit Kafka offset ngay
+
+  Worker riêng xử lý việc gửi:
+    → Đọc từ queue → gọi provider → update status
+```
+
+---
+
+## Retry khi gửi fail
+
+```
+Email/SMS/Push provider có thể tạm lỗi.
+Retry strategy:
+  - Lần 1 fail → retry sau 30s
+  - Lần 2 fail → retry sau 2 phút
+  - Lần 3 fail → retry sau 10 phút
+  - Vẫn fail → status = FAILED, không retry nữa
+
+Dùng Spring Retry hoặc scheduled job quét notification PENDING/FAILED.
+```
+
+---
+
+## Rate limiting — chống spam user
+
+```
+Không gửi quá nhiều notification cùng loại cho 1 user:
+  - Tối đa 1 email marketing/ngày
+  - Tối đa 5 push notification/giờ
+
+Check Redis noti:ratelimit:{userId}:{type} trước khi gửi.
+```
+
+---
+
+## Kafka — Consumer group & partition
+
+```
+Notification Service consume RẤT NHIỀU topic.
+Cấu hình:
+  - 1 consumer group: notification-service-group
+  - Subscribe nhiều topic cùng lúc
+  - Tăng số partition + số consumer instance nếu volume cao
+  - concurrency = số partition (mỗi thread xử lý 1 partition)
+
+Vì Notification chỉ gửi thông báo (không ảnh hưởng data core),
+nếu 1 event xử lý fail → log + skip, không làm hỏng cả flow.
+```
