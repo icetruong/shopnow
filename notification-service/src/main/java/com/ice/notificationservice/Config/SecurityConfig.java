@@ -1,4 +1,4 @@
-package com.ice.shippingservice.Config;
+package com.ice.notificationservice.Config;
 
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;

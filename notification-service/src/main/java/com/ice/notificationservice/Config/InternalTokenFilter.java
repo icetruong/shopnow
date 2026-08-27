@@ -1,4 +1,4 @@
-package com.ice.shippingservice.Config;
+package com.ice.notificationservice.Config;
 
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;

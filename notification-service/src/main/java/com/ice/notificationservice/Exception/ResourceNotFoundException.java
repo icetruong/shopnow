@@ -1,4 +1,4 @@
-package com.ice.shippingservice.Exception;
+package com.ice.notificationservice.Exception;
 
 public class ResourceNotFoundException extends RuntimeException {
     public ResourceNotFoundException(String message) {
