@@ -1,0 +1,4 @@
+package com.ice.notificationservice.Repository;
+
+public interface DeviceTokenRepo {
+}
