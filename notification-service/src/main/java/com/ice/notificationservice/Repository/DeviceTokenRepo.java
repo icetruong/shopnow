@@ -1,4 +1,9 @@
 package com.ice.notificationservice.Repository;
 
-public interface DeviceTokenRepo {
+import com.ice.notificationservice.Entity.DeviceToken;
+import org.springframework.data.jpa.repository.JpaRepository;
+
+import java.util.UUID;
+
+public interface DeviceTokenRepo extends JpaRepository<DeviceToken, UUID> {
 }

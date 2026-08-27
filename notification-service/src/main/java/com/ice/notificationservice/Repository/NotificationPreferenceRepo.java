@@ -1,4 +1,9 @@
 package com.ice.notificationservice.Repository;
 
-public interface NotificationPreferenceRepo {
+import com.ice.notificationservice.Entity.NotificationPreference;
+import org.springframework.data.jpa.repository.JpaRepository;
+
+import java.util.UUID;
+
+public interface NotificationPreferenceRepo extends JpaRepository<NotificationPreference, UUID> {
 }

@@ -1,4 +1,4 @@
-package com.ice.notificationservice.Config;
+package com.ice.searchservice.Config;
 
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
