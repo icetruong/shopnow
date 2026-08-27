@@ -7,6 +7,8 @@
 http://localhost:8088/api/v1
 ```
 
+> Port `8088` — các service khác đang dùng: user `8081`, product `8082`, inventory `8083`, cart `8084`, order `8085`, payment `8086`, shipping `8087`.
+
 ## Vai trò
 Notification Service là **consumer thuần túy** — nó lắng nghe hầu hết các Kafka event trong hệ thống và gửi thông báo qua nhiều kênh (Email, SMS, Push notification). Đây là service ít expose REST API nhất, chủ yếu hoạt động ngầm.
 
@@ -18,62 +20,9 @@ Notification Service là **consumer thuần túy** — nó lắng nghe hầu h�
 - Lưu lịch sử để user xem lại (notification center)
 
 ---
-
-# PHẦN 1 — KAFKA CONSUMERS (phần chính)
-
 ---
 
-## Bảng mapping Event → Notification
-
-| Kafka Event | Kênh gửi | Nội dung |
-|---|---|---|
-| `user.registered` | Email | Email chào mừng + xác thực tài khoản |
-| `user.password_reset_requested` | Email | Link đặt lại mật khẩu |
-| `order.created` | Push | "Đơn hàng đang được xử lý" |
-| `order.confirmed` | Email + Push | Email xác nhận đơn + biên lai |
-| `order.cancelled` | Email + Push | "Đơn hàng đã bị hủy" |
-| `payment.processed` (SUCCESS) | Email + SMS | Biên lai thanh toán |
-| `payment.processed` (FAILED) | Push | "Thanh toán thất bại, thử lại" |
-| `payment.refunded` | Email | "Đã hoàn tiền" |
-| `shipment.updated` (IN_TRANSIT) | Push | "Đơn hàng đang được giao" |
-| `shipment.updated` (DELIVERED) | Push + SMS | "Đơn hàng đã giao thành công" |
-| `stock.low_warning` | Email (admin) | Cảnh báo sắp hết hàng |
-| `promotion.flash_sale_starting` | Push (broadcast) | "Flash sale sắp bắt đầu!" |
-
----
-
-## Consumer flow chung
-
-```
-Kafka event đến
-  │
-  ├─ 1. Idempotency check: processed:event:{eventId} tồn tại?
-  │     └─ Có → skip
-  │
-  ├─ 2. Xác định loại notification cần gửi (theo eventType)
-  │
-  ├─ 3. Lấy thông tin người nhận
-  │     └─ Gọi User Service GET /internal/users/{userId} lấy email/phone
-  │     └─ Hoặc dùng data có sẵn trong event payload
-  │
-  ├─ 4. Render template với data từ event
-  │
-  ├─ 5. Đẩy vào internal queue (async, không block consumer)
-  │
-  ├─ 6. INSERT notification record (status = PENDING)
-  │
-  └─ 7. SET processed:event:{eventId}
-  
-Worker xử lý queue:
-  │
-  ├─ Gửi qua provider (Email/SMS/Push)
-  ├─ Thành công → UPDATE status = SENT
-  └─ Fail → retry (tối đa 3 lần) → nếu vẫn fail → status = FAILED
-```
-
----
-
-# PHẦN 2 — REST API ENDPOINTS
+# PHẦN 1 — API ENDPOINTS
 
 ---
 
@@ -98,6 +47,7 @@ type   = ORDER    (ORDER | PAYMENT | SHIPMENT | PROMOTION | SYSTEM, optional)
 ```json
 {
   "success": true,
+  "message": "Lấy danh sách thông báo thành công",
   "data": {
     "content": [
       {
@@ -122,11 +72,15 @@ type   = ORDER    (ORDER | PAYMENT | SHIPMENT | PROMOTION | SYSTEM, optional)
       }
     ],
     "page":          0,
+    "size":          20,
     "totalElements": 15,
+    "totalPages":    1,
     "unreadCount":   3
   }
 }
 ```
+
+> `content / page / size / totalElements / totalPages` — cùng format phân trang với order-service / payment-service. `unreadCount` là field bổ sung riêng của notification center.
 
 ---
 
@@ -318,6 +272,8 @@ Gửi thông báo hàng loạt (marketing, thông báo hệ thống).
 ### GET /admin/notifications/history
 Lịch sử gửi notification, thống kê tỉ lệ gửi thành công.
 
+**Header:** `Authorization: Bearer {accessToken}` *(ROLE_ADMIN)*
+
 **Query Params**
 ```
 page      = 0
@@ -342,6 +298,10 @@ startDate = 2024-01-01
         "sentAt":         "2024-01-15T10:31:00Z"
       }
     ],
+    "page":          0,
+    "size":          20,
+    "totalElements": 1262,
+    "totalPages":    64,
     "stats": {
       "totalSent":   1250,
       "totalFailed": 12,
@@ -350,6 +310,8 @@ startDate = 2024-01-01
   }
 }
 ```
+
+> `content / page / size / totalElements / totalPages` — cùng format phân trang với `GET /admin/payments` / `GET /admin/shipments`. `stats` là block bổ sung để hiển thị tỉ lệ gửi thành công.
 
 ---
 
@@ -361,6 +323,15 @@ startDate = 2024-01-01
 | `DEVICE_TOKEN_INVALID` | 400 | FCM token không hợp lệ |
 | `PROVIDER_ERROR` | 502 | Lỗi từ nhà cung cấp email/SMS/push |
 | `TEMPLATE_NOT_FOUND` | 404 | Không tìm thấy template |
+
+**Error response format** (giống các service khác):
+```json
+{
+  "success": false,
+  "code":    "NOTIFICATION_NOT_FOUND",
+  "message": "Không tìm thấy thông báo."
+}
+```
 
 ---
 
@@ -381,10 +352,9 @@ startDate = 2024-01-01
 | GET | /admin/notifications/history | ✅ | ADMIN |
 
 ---
-
 ---
 
-# PHẦN 3 — DATABASE SCHEMA
+# PHẦN 2 — DATABASE SCHEMA
 
 ---
 
@@ -506,10 +476,162 @@ CREATE UNIQUE INDEX idx_notification_templates_code ON notification_templates(co
 
 | Key pattern | Value | TTL | Mục đích |
 |-------------|-------|-----|---------|
-| `processed:event:{eventId}` | `"1"` | 24 giờ | Idempotency Kafka consumer |
+| `processed:event:{eventId}` | `"1"` | 24 giờ | Idempotency Kafka consumer (giống order-service / shipping-service / payment-service) |
 | `noti:unread:{userId}` | INT | Không TTL | Cache số thông báo chưa đọc |
 | `noti:ratelimit:{userId}:{type}` | INT | 1 giờ | Chống spam (giới hạn số noti/giờ) |
 
+---
+---
+
+# PHẦN 3 — KAFKA CONSUMERS (phần chính)
+
+---
+
+## Kafka Event Envelope
+
+Mọi event nhận về là JSON của `KafkaEvent<T>` — **deserialize bằng `ObjectMapper`** (consumer nhận `String`, rồi `objectMapper.readValue(message, new TypeReference<KafkaEvent<T>>(){})`), **giống hệt order-service / shipping-service**:
+
+```json
+{
+  "eventId":   "uuid-v4",
+  "eventType": "order.confirmed",
+  "timestamp": "2024-01-15T10:31:00Z",
+  "version":   "1.0",
+  "payload":   { ... }
+}
+```
+
+**Cấu hình consumer (đồng bộ convention với order-service / shipping-service):**
+```properties
+spring.application.name=notification-service
+server.port=8088
+
+spring.kafka.bootstrap-servers=localhost:9092
+spring.kafka.consumer.group-id=notification-service
+spring.kafka.consumer.auto-offset-reset=earliest
+spring.kafka.consumer.key-deserializer=org.apache.kafka.common.serialization.StringDeserializer
+spring.kafka.consumer.value-deserializer=org.apache.kafka.common.serialization.StringDeserializer
+
+# Producer JSON (chỉ dùng nếu về sau cần publish, VD notification.sent) — giống order-service
+spring.kafka.producer.key-serializer=org.apache.kafka.common.serialization.StringSerializer
+spring.kafka.producer.value-serializer=org.springframework.kafka.support.serializer.JsonSerializer
+
+# Internal REST
+internal.secret-token=${INTERNAL_SECRET_TOKEN}
+user.service.url=http://localhost:8081
+order.service.url=http://localhost:8085
+
+spring.data.redis.host=localhost
+spring.data.redis.port=6379
+```
+
+> **group-id = `notification-service`** (không có hậu tố `-group`) — thống nhất với `groupId = "order-service"` và `group-id = shipping-service` ở các listener của 2 service kia. Mỗi service 1 consumer group riêng → nhận đủ mọi message của topic mình subscribe.
+
+---
+
+## Bảng mapping Event → Notification
+
+| Kafka Event | Publisher | Kênh gửi | Nội dung |
+|---|---|---|---|
+| `user.registered` | User Service | Email | Email chào mừng + xác thực tài khoản |
+| `user.password_reset_requested` | User Service | Email | Link đặt lại mật khẩu |
+| `order.created` | Order Service | Push | "Đơn hàng đang được xử lý" |
+| `order.confirmed` | Order Service | Email + Push | Email xác nhận đơn + biên lai |
+| `order.cancelled` | Order Service | Email + Push | "Đơn hàng đã bị hủy" |
+| `payment.processed` (SUCCESS) | Payment Service | Email + SMS | Biên lai thanh toán |
+| `payment.processed` (FAILED) | Payment Service | Push | "Thanh toán thất bại, thử lại" |
+| `payment.refunded` | Payment Service | Email | "Đã hoàn tiền" |
+| `shipment.updated` (IN_TRANSIT) | Shipping Service | Push | "Đơn hàng đang được giao" |
+| `shipment.updated` (DELIVERED) | Shipping Service | Push + SMS | "Đơn hàng đã giao thành công" |
+| `stock.low_warning` | Inventory Service | Email (admin) | Cảnh báo sắp hết hàng |
+| `promotion.flash_sale_starting` | Promotion Service *(Phase 4 — chưa build)* | Push (broadcast) | "Flash sale sắp bắt đầu!" |
+
+> `promotion.flash_sale_starting` chưa hoạt động cho tới khi Promotion Service (Phase 4) tồn tại và publish topic này. Consumer có thể để sẵn nhưng inactive — không nằm trong 8 topic gốc ở `Project_context.md`.
+
+---
+
+## Payload từng event & cách lấy người nhận
+
+| Topic | Payload fields (theo spec của publisher) | Lấy `userId` / người nhận thế nào |
+|---|---|---|
+| `user.registered` | userId, email, fullName, provider, createdAt | Có sẵn `userId` + `email` + `fullName` trong payload → **không cần gọi REST** |
+| `user.password_reset_requested` | userId, email, resetToken, expiresAt | Có sẵn `userId` + `email` trong payload |
+| `order.created` | orderId, orderCode, userId, totalAmount, items[], shippingAddress | Có sẵn `userId` |
+| `order.confirmed` | orderId, orderCode, userId, shippingAddress, items[] | Có sẵn `userId` |
+| `order.cancelled` | orderId, reason, needReleaseStock, items[] | **Không có `userId`** → gọi Order Service (xem dưới) |
+| `payment.processed` | orderId, paymentId, status, method, amount, transactionId, paidAt | **Không có `userId`** → gọi Order Service |
+| `payment.refunded` | orderId, refundId, amount, refundedAt | **Không có `userId`** → gọi Order Service |
+| `shipment.updated` | orderId, shipmentId, trackingCode, carrier, status, description, estimatedDate | **Không có `userId`** → gọi Order Service |
+| `stock.low_warning` | variantId, sku, currentStock, threshold | Gửi cho **admin** (email cấu hình sẵn), không cần userId người mua |
+
+**Resolve thông tin người nhận:**
+```
+1. Có userId trong payload
+   → GET http://localhost:8081/api/v1/internal/users/{userId}
+     Header: X-Internal-Token: {sharedSecret}
+     → nhận { userId, fullName, email, phone }
+
+2. Chỉ có orderId (order.cancelled, payment.*, shipment.updated)
+   → GET http://localhost:8085/api/v1/internal/orders/{orderId}
+     Header: X-Internal-Token: {sharedSecret}
+     → lấy userId + thông tin đơn (orderCode, totalAmount, items...) để render template
+   → rồi làm bước 1 với userId vừa lấy nếu cần email/phone
+```
+
+---
+
+## Consumer flow chung
+
+```
+Kafka event đến (String) → objectMapper.readValue → KafkaEvent<T>
+  │
+  ├─ 1. Idempotency check: Redis processed:event:{eventId} tồn tại?
+  │     └─ Có → skip
+  │
+  ├─ 2. Xác định loại notification cần gửi (theo eventType)
+  │
+  ├─ 3. Lấy thông tin người nhận (xem bảng "Payload từng event" ở trên)
+  │     └─ Gọi User Service GET /internal/users/{userId}  (Header: X-Internal-Token)
+  │     └─ Nếu payload không có userId → gọi Order Service GET /internal/orders/{orderId} trước
+  │     └─ Hoặc dùng data có sẵn trong event payload (user.*, order.created/confirmed)
+  │
+  ├─ 4. Check notification_preferences của user → nếu user tắt loại này thì skip
+  │
+  ├─ 5. Render template với data từ event
+  │
+  ├─ 6. Đẩy vào internal queue (async, không block consumer)
+  │
+  ├─ 7. INSERT notification record (status = PENDING)
+  │
+  └─ 8. SET Redis processed:event:{eventId} = "1" TTL 24h
+
+Worker xử lý queue:
+  │
+  ├─ Gửi qua provider (Email/SMS/Push)
+  ├─ Thành công → UPDATE status = SENT, sent_at = NOW()
+  └─ Fail → retry (tối đa 3 lần) → nếu vẫn fail → status = FAILED
+```
+
+> Vì Notification chỉ gửi thông báo (không ảnh hưởng data core), nếu 1 event xử lý fail → log + skip, không làm hỏng cả flow. Không throw để Kafka retry vô hạn với lỗi không thể phục hồi (VD user đã bị xóa).
+
+---
+
+## Kafka — Consumer group & partition
+
+```
+Notification Service consume RẤT NHIỀU topic.
+Cấu hình:
+  - 1 consumer group: notification-service   (không có hậu tố -group)
+  - Subscribe nhiều topic cùng lúc
+  - Tăng số partition + số consumer instance nếu volume cao
+  - concurrency = số partition (mỗi thread xử lý 1 partition)
+
+Kafka message key của các event nguồn = entityId liên quan nhất
+(userId cho user.*, orderId cho order.*/payment.*/shipment.updated)
+→ cùng 1 đơn hàng, các event tới đúng thứ tự trong cùng partition.
+```
+
+---
 ---
 
 # PHẦN 4 — TÍCH HỢP PROVIDER
@@ -570,6 +692,7 @@ Xử lý token hết hạn:
 ```
 
 ---
+---
 
 # PHẦN 5 — CÁC PATTERN QUAN TRỌNG
 
@@ -618,20 +741,4 @@ Không gửi quá nhiều notification cùng loại cho 1 user:
   - Tối đa 5 push notification/giờ
 
 Check Redis noti:ratelimit:{userId}:{type} trước khi gửi.
-```
-
----
-
-## Kafka — Consumer group & partition
-
-```
-Notification Service consume RẤT NHIỀU topic.
-Cấu hình:
-  - 1 consumer group: notification-service-group
-  - Subscribe nhiều topic cùng lúc
-  - Tăng số partition + số consumer instance nếu volume cao
-  - concurrency = số partition (mỗi thread xử lý 1 partition)
-
-Vì Notification chỉ gửi thông báo (không ảnh hưởng data core),
-nếu 1 event xử lý fail → log + skip, không làm hỏng cả flow.
 ```

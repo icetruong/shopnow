@@ -569,103 +569,7 @@ Xóa ảnh — xóa cả file trên MinIO/S3 và record trong DB.
 
 ---
 
-## 5. SEARCH — Tìm kiếm Elasticsearch
-
----
-
-### GET /products/search
-Tìm kiếm sản phẩm full-text qua Elasticsearch.
-
-**Query Params**
-```
-q           = "áo polo nam"     (từ khóa tìm kiếm — bắt buộc)
-page        = 0
-size        = 20
-categoryId  = cat-uuid-2        (filter)
-minPrice    = 100000
-maxPrice    = 500000
-color       = "Trắng"           (filter theo màu sắc trong variant)
-size_filter = "M"               (filter theo size trong variant, dùng size_filter để không trùng query param size)
-sort        = relevance          (relevance | price_asc | price_desc | newest | bestseller | rating)
-```
-
-**Response 200**
-```json
-{
-  "success": true,
-  "message": "retrieved successfully",
-  "data": {
-    "content": [
-      {
-        "productId":   "prod-uuid-1",
-        "name":        "Áo Polo Nam Basic",
-        "slug":        "ao-polo-nam-basic",
-        "thumbnail":   "https://storage.shopnow.com/products/ao-polo/thumb.jpg",
-        "basePrice":   299000,
-        "salePrice":   249000,
-        "rating":      4.5,
-        "soldCount":   340,
-        "highlight": {
-          "name":        ["Áo <em>Polo</em> <em>Nam</em> Basic"],
-          "description": ["...chất liệu phù hợp cho <em>nam</em> giới..."]
-        }
-      }
-    ],
-    "page":          0,
-    "size":          20,
-    "totalElements": 12,
-    "totalPages":    1,
-    "isLast":        true,
-    "aggregations": {
-      "categories": [
-        { "categoryId": "cat-uuid-2", "name": "Áo nam", "count": 10 },
-        { "categoryId": "cat-uuid-6", "name": "Áo unisex", "count": 2 }
-      ],
-      "priceRanges": [
-        { "from": 0,      "to": 200000, "count": 2 },
-        { "from": 200000, "to": 500000, "count": 8 },
-        { "from": 500000, "to": null,   "count": 2 }
-      ],
-      "colors": [
-        { "value": "Trắng",    "count": 6 },
-        { "value": "Xanh navy","count": 4 },
-        { "value": "Đỏ",      "count": 2 }
-      ],
-      "sizes": ["S", "M", "L", "XL"]
-    }
-  }
-}
-```
-
-**Lưu ý:** `aggregations` dùng để render bộ lọc bên sidebar — trả về count của từng giá trị filter.
-
----
-
-### GET /products/search/suggest
-Gợi ý tìm kiếm (autocomplete) khi user đang gõ.
-
-**Query Params**
-```
-q    = "áo po"    (từ khóa đang gõ dở)
-size = 5          (số gợi ý, default 5, max 10)
-```
-
-**Response 200**
-```json
-{
-  "success": true,
-  "message": "retrieved successfully",
-  "data": [
-    "Áo Polo Nam Basic",
-    "Áo Polo Nam Cao Cấp",
-    "Áo Polo Unisex"
-  ]
-}
-```
-
----
-
-## 6. INTERNAL — Dành cho các service khác
+## 5. INTERNAL — Dành cho các service khác
 
 ---
 
@@ -790,7 +694,7 @@ Review Service gọi sau khi có review mới để cập nhật điểm trung b
 
 ---
 
-## 7. ERROR CODES đặc thù của Product Service
+## 6. ERROR CODES đặc thù của Product Service
 
 | Code | HTTP | Ý nghĩa |
 |------|------|---------|
@@ -806,7 +710,7 @@ Review Service gọi sau khi có review mới để cập nhật điểm trung b
 
 ---
 
-## 8. TỔNG HỢP ENDPOINTS
+## 7. TỔNG HỢP ENDPOINTS
 
 | Method | Endpoint | Auth | Role |
 |--------|----------|------|------|
@@ -816,8 +720,6 @@ Review Service gọi sau khi có review mới để cập nhật điểm trung b
 | DELETE | /admin/categories/{id} | ✅ | ADMIN |
 | GET | /products | ❌ | — |
 | GET | /products/{slug} | ❌ | — |
-| GET | /products/search | ❌ | — |
-| GET | /products/search/suggest | ❌ | — |
 | POST | /admin/products | ✅ | ADMIN |
 | PUT | /admin/products/{id} | ✅ | ADMIN |
 | PATCH | /admin/products/{id}/status | ✅ | ADMIN |
@@ -977,45 +879,11 @@ CREATE INDEX idx_product_images_product_id ON product_images(product_id);
 
 ---
 
-## Elasticsearch Index — products
+## Elasticsearch — thuộc Search Service
 
-```json
-{
-  "mappings": {
-    "properties": {
-      "productId":   { "type": "keyword" },
-      "name":        {
-        "type": "text",
-        "analyzer": "vi_analyzer",
-        "fields": {
-          "keyword": { "type": "keyword" }
-        }
-      },
-      "slug":        { "type": "keyword" },
-      "description": { "type": "text", "analyzer": "vi_analyzer" },
-      "categoryId":  { "type": "keyword" },
-      "categoryName":{ "type": "keyword" },
-      "basePrice":   { "type": "long" },
-      "salePrice":   { "type": "long" },
-      "rating":      { "type": "float" },
-      "soldCount":   { "type": "integer" },
-      "reviewCount": { "type": "integer" },
-      "isActive":    { "type": "boolean" },
-      "isDeleted":   { "type": "boolean" },
-      "colors":      { "type": "keyword" },
-      "sizes":       { "type": "keyword" },
-      "thumbnail":   { "type": "keyword", "index": false },
-      "createdAt":   { "type": "date" },
-      "updatedAt":   { "type": "date" }
-    }
-  }
-}
-```
+Product Service **không** giữ tìm kiếm Elasticsearch. Định nghĩa ES index (`products`), settings/mappings, analyzer, Query DSL và luồng đồng bộ nằm ở **`search-service/searchServiceApiSpec.md`** (PHẦN 2–4).
 
-**Lưu ý:**
-- `colors` và `sizes` là mảng keyword — lấy từ toàn bộ variant của sản phẩm, dùng để filter.
-- Khi nào sync vào ES: **Search Service** consume Kafka event `product.updated` rồi tự upsert. Product Service không ghi thẳng vào ES.
-- `vi_analyzer`: cần cài plugin `analysis-icu` để tìm kiếm tiếng Việt đúng dấu.
+Product Service chỉ publish Kafka event `product.updated` (bên dưới); Search Service consume và tự upsert vào ES. Product Service không đọc/ghi Elasticsearch.
 
 ---
 
