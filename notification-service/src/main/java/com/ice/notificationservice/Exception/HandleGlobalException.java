@@ -1,6 +1,7 @@
 package com.ice.notificationservice.Exception;
 
 import com.ice.notificationservice.DTO.Response.Common.ApiResponse;
+import com.ice.notificationservice.Enum.ErrorCode;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;

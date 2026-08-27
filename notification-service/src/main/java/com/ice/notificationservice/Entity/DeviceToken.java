@@ -1,6 +1,6 @@
 package com.ice.notificationservice.Entity;
 
-import com.ice.notificationservice.Enum.DeviceTokenFlatform;
+import com.ice.notificationservice.Enum.DeviceTokenPlatform;
 import jakarta.persistence.*;
 import lombok.*;
 
@@ -36,7 +36,7 @@ public class DeviceToken {
     /** ANDROID / IOS / WEB. */
     @Enumerated(EnumType.STRING)
     @Column(name = "platform", nullable = false, length = 20)
-    private DeviceTokenFlatform platform;
+    private DeviceTokenPlatform platform;
 
     @Column(name = "device_name", length = 100)
     private String deviceName;
@@ -53,6 +53,6 @@ public class DeviceToken {
 
     @PrePersist
     protected void onCreate() {
-        createdAt = LocalDateTime.now();;
+        createdAt = LocalDateTime.now();
     }
 }
