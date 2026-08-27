@@ -1,8 +1,10 @@
 package com.ice.orderservice.Controller;
 
 import com.ice.orderservice.DTO.Request.Order.AdminUpdateStatusOrderRequest;
+import com.ice.orderservice.DTO.Request.Order.CancelledOrderRequest;
 import com.ice.orderservice.DTO.Response.Common.ApiResponse;
 import com.ice.orderservice.DTO.Response.Order.AdminOrderPageResponse;
+import com.ice.orderservice.DTO.Response.Order.CancelledOrderResponse;
 import com.ice.orderservice.Enum.OrderStatus;
 import com.ice.orderservice.Enum.PaymentStatus;
 import com.ice.orderservice.Service.OrderService;
@@ -55,6 +57,20 @@ public class AdminOrderController {
                 ApiResponse.success(
                         "Đã cập nhật trạng thái đơn hàng.",
                         null
+                )
+        );
+    }
+
+    @PostMapping("/{orderId}/cancel")
+    public ResponseEntity<ApiResponse<CancelledOrderResponse>> cancelOrderByAdmin(@Valid @RequestBody CancelledOrderRequest request, @PathVariable String orderId, Authentication authentication)
+    {
+        Jwt jwt = (Jwt) authentication.getPrincipal();
+        String adminUserId = jwt.getClaimAsString("userId");
+
+        return ResponseEntity.ok(
+                ApiResponse.success(
+                        "Đã hủy đơn hàng thay khách hàng.",
+                        orderService.cancelOrderByAdmin(request, orderId, adminUserId)
                 )
         );
     }

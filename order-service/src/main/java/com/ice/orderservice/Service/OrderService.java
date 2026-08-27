@@ -61,9 +61,12 @@ public class OrderService {
     private final InventoryClient inventoryClient;
     private final KafkaProducerService kafkaProducerService;
 
+    // Chỉ chứa các bước thuần logistics, không cần xác thực nghiệp vụ gì thêm.
+    // PENDING->CONFIRMED (cần xác nhận thanh toán/trừ kho) và *->CANCELLED (cần refund/release/return)
+    // KHÔNG được phép đi qua đây — phải qua createOrder()/PaymentProcessedListener/cancelledOrder()
+    // để đảm bảo đúng điều kiện nghiệp vụ, admin không thể tự ý bypass qua PATCH status.
     private static final Map<OrderStatus, Set<OrderStatus>> ALLOWED_STATUS_TRANSITIONS = Map.of(
-            OrderStatus.PENDING, Set.of(OrderStatus.CONFIRMED, OrderStatus.CANCELLED),
-            OrderStatus.CONFIRMED, Set.of(OrderStatus.PROCESSING, OrderStatus.CANCELLED),
+            OrderStatus.CONFIRMED, Set.of(OrderStatus.PROCESSING),
             OrderStatus.PROCESSING, Set.of(OrderStatus.SHIPPING),
             OrderStatus.SHIPPING, Set.of(OrderStatus.DELIVERED),
             OrderStatus.DELIVERED, Set.of(OrderStatus.COMPLETED)
@@ -196,6 +199,8 @@ public class OrderService {
                 DeductResponse deductResponse = inventoryClient.deduct(new DeductRequest(saveOrder.getId().toString()));
                 sagaState.getCompletedSteps().add("PAYMENT_PROCESSED");
                 sagaState.getCompletedSteps().add("STOCK_DEDUCTED");
+                sagaState.getCompletedSteps().add("ORDER_CONFIRMED");
+                sagaState.setCurrentStep(CurrentStep.ORDER_CONFIRMED);
                 saveOrder.setStatus(OrderStatus.CONFIRMED);
                 sagaState.setSagaStatus(SagaStatus.COMPLETED);
             }
@@ -313,12 +318,25 @@ public class OrderService {
             throw new OrderAccessDeniedException("Đơn hàng không thuộc về bạn");
         }
 
+        return doCancelOrder(order, request, userId);
+    }
+
+    @Transactional
+    public CancelledOrderResponse cancelOrderByAdmin(CancelledOrderRequest request, String orderId, String adminUserId) {
+        Order order = orderRepo.findById(UUID.fromString(orderId))
+                .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy đơn hàng"));
+
+        // Không check order.getUserId() — admin được hủy đơn của bất kỳ khách hàng nào.
+        return doCancelOrder(order, request, adminUserId);
+    }
+
+    private CancelledOrderResponse doCancelOrder(Order order, CancelledOrderRequest request, String changedBy) {
         if(order.getStatus() != OrderStatus.CONFIRMED && order.getStatus() != OrderStatus.PENDING)
         {
             throw new OrderCannotCancelException("Trạng thái đơn hàng không thể hủy");
         }
 
-        SagaState sagaState = sageStateRepo.findByOrderId(UUID.fromString(orderId))
+        SagaState sagaState = sageStateRepo.findByOrderId(order.getId())
                 .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy Sage State của đơn hàng"));
 
         OrderStatus oldStatus = order.getStatus();
@@ -346,7 +364,7 @@ public class OrderService {
                 .fromStatus(oldStatus)
                 .toStatus(order.getStatus())
                 .note(request.getReason())
-                .changedBy(userId)
+                .changedBy(changedBy)
                 .build();
         order.getOrderStatusHistories().add(history);
 
@@ -378,6 +396,9 @@ public class OrderService {
             ));
         }
 
+        sagaState.setSagaStatus(SagaStatus.COMPENSATED);
+        sageStateRepo.save(sagaState);
+
         boolean needReleaseStock = false;
 
         List<OrderItemEvent> items = order.getOrderItems().stream()
@@ -385,14 +406,14 @@ public class OrderService {
                 .toList();
 
         kafkaProducerService.publishOrderCancelledEvent(new OrderCancelledPayload(
-                orderId,
+                savedOrder.getId().toString(),
                 request.getReason(),
                 needReleaseStock,
                 items
         ));
 
         return new CancelledOrderResponse(
-                orderId,
+                savedOrder.getId().toString(),
                 savedOrder.getStatus().name()
         );
     }

@@ -351,7 +351,7 @@ So với `GET /orders` (dành cho user), item ở đây có thêm 2 field: `user
 ---
 
 ### PATCH /admin/orders/{orderId}/status
-Admin cập nhật trạng thái đơn (xác nhận, đóng gói...).
+Admin cập nhật trạng thái đơn — **chỉ dùng cho chuỗi logistics thuần túy**, không dùng để confirm hay hủy đơn.
 
 **Request Body**
 ```json
@@ -361,11 +361,60 @@ Admin cập nhật trạng thái đơn (xác nhận, đóng gói...).
 }
 ```
 
+**`status` hợp lệ theo trạng thái hiện tại** (chỉ đúng chiều mũi tên ngang trong state machine bên dưới):
+```
+CONFIRMED  → PROCESSING
+PROCESSING → SHIPPING
+SHIPPING   → DELIVERED
+DELIVERED  → COMPLETED
+```
+
+> **`PENDING→CONFIRMED` và `*→CANCELLED` KHÔNG được phép qua endpoint này** — dù state machine ở mục 5 có vẽ 2 mũi tên đó, chúng đòi hỏi xác thực nghiệp vụ (đã thanh toán/trừ kho thật chưa; đã refund/release kho chưa) mà endpoint generic PATCH status này không có. 2 transition đó chỉ được phép xảy ra qua đúng luồng chuyên biệt:
+> - `PENDING→CONFIRMED`: nội bộ — `createOrder()` (COD) hoặc `PaymentProcessedListener` (online, sau khi có `payment.processed` SUCCESS thật).
+> - `*→CANCELLED`: `POST /orders/{orderId}/cancel` (user) hoặc `POST /admin/orders/{orderId}/cancel` (admin) — xem ngay bên dưới.
+>
+> Gọi `PATCH .../status` với `status = "CONFIRMED"` hoặc `"CANCELLED"` sẽ nhận lỗi `400 INVALID_STATUS_TRANSITION`.
+
 **Response 200**
 ```json
 {
   "success": true,
   "message": "Đã cập nhật trạng thái đơn hàng."
+}
+```
+
+---
+
+### POST /admin/orders/{orderId}/cancel
+Admin hủy đơn **thay khách hàng** (ví dụ khách gọi hotline nhờ hủy) — tái sử dụng **y hệt logic compensating** của `POST /orders/{orderId}/cancel` (refund nếu đã thanh toán, release/return kho tương ứng, cập nhật saga, publish `order.cancelled`), chỉ khác duy nhất: **không check quyền sở hữu đơn** (admin được hủy đơn của bất kỳ khách hàng nào).
+
+**Header:** `Authorization: Bearer {accessToken}` *(ROLE_ADMIN)*
+
+**Request Body**
+```json
+{
+  "reason": "Khách gọi hotline yêu cầu hủy"
+}
+```
+
+**Response 200**
+```json
+{
+  "success": true,
+  "message": "Đã hủy đơn hàng thay khách hàng.",
+  "data": {
+    "orderId": "order-uuid-1",
+    "status":  "CANCELLED"
+  }
+}
+```
+
+**Response 409** — không hủy được (giống hệt điều kiện của bản dành cho user — chỉ hủy được khi `PENDING`/`CONFIRMED`)
+```json
+{
+  "success": false,
+  "code":    "ORDER_CANNOT_CANCEL",
+  "message": "Trạng thái đơn hàng không thể hủy."
 }
 ```
 
@@ -392,7 +441,7 @@ REFUNDING   — Đang hoàn tiền
 REFUNDED    — Đã hoàn tiền xong
 ```
 
-**Quy tắc chuyển trạng thái:** Chỉ cho phép chuyển theo đúng chiều mũi tên. Mọi chuyển trạng thái sai phải bị từ chối (validate trong Service).
+**Quy tắc chuyển trạng thái:** Chỉ cho phép chuyển theo đúng chiều mũi tên. Mọi chuyển trạng thái sai phải bị từ chối (validate trong Service). Riêng `PENDING→CONFIRMED` và `*→CANCELLED` **không** đi qua `PATCH /admin/orders/{orderId}/status` — xem ghi chú ở mục đó.
 
 **COD & thu tiền khi giao hàng:** Khi order chuyển sang `DELIVERED` với `paymentMethod = COD`, Order Service gọi REST nội bộ `PATCH /internal/payments/{paymentId}/confirm-cod` bên Payment Service để đánh dấu đã thu tiền (chỉ phục vụ đối soát/lịch sử, không ảnh hưởng đến saga vì đơn COD đã `CONFIRMED` từ trước khi giao).
 
@@ -421,6 +470,7 @@ REFUNDED    — Đã hoàn tiền xong
 | GET | /internal/orders/{orderId} | 🔒 Internal | — |
 | GET | /admin/orders | ✅ | ADMIN |
 | PATCH | /admin/orders/{orderId}/status | ✅ | ADMIN |
+| POST | /admin/orders/{orderId}/cancel | ✅ | ADMIN |
 
 ---
 
