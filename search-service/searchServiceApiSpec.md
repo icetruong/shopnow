@@ -20,43 +20,6 @@ Search Service quản lý toàn bộ tìm kiếm sản phẩm qua Elasticsearch.
 
 ---
 
-## Cấu hình (application.properties)
-
-Đồng bộ convention với order-service / shipping-service / notification-service:
-
-```properties
-spring.application.name=search-service
-server.port=8089
-
-# JWT (chung public key với các service khác) — các endpoint /search đều public, chỉ cần khi mở rộng
-spring.security.oauth2.resourceserver.jwt.public-key-location=classpath:keys/public.pem
-
-# Internal REST
-internal.secret-token=${INTERNAL_SECRET_TOKEN}
-product.service.url=http://localhost:8082
-
-# Elasticsearch
-spring.elasticsearch.uris=http://localhost:9200
-
-# Kafka — GIỐNG order-service: consumer nhận String rồi tự parse bằng ObjectMapper
-spring.kafka.bootstrap-servers=localhost:9092
-spring.kafka.consumer.group-id=search-service
-spring.kafka.consumer.auto-offset-reset=earliest
-spring.kafka.consumer.key-deserializer=org.apache.kafka.common.serialization.StringDeserializer
-spring.kafka.consumer.value-deserializer=org.apache.kafka.common.serialization.StringDeserializer
-# Producer (không bắt buộc — Search Service hầu như không publish event nào)
-spring.kafka.producer.key-serializer=org.apache.kafka.common.serialization.StringSerializer
-spring.kafka.producer.value-serializer=org.springframework.kafka.support.serializer.JsonSerializer
-
-# Redis
-spring.data.redis.host=localhost
-spring.data.redis.port=6379
-```
-
-> **group-id = `search-service`** (không có hậu tố `-group` — `Project_context.md` ghi `search-service-group` là bản cũ). Thống nhất với `groupId = "order-service"`, `group-id = shipping-service`, `group-id = notification-service`.
-
----
-
 # PHẦN 1 — API ENDPOINTS
 
 ---

@@ -30,6 +30,7 @@ public class NotificationTemplate {
 
     /** EMAIL / SMS / PUSH. */
     @Column(name = "channel", nullable = false, length = 20)
+    @Enumerated(EnumType.STRING)
     private NotificationChannel channel;
 
     /** Tiêu đề (email). */

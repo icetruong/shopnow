@@ -1,6 +1,6 @@
 package com.ice.notificationservice.Enum;
 
-public enum DeviceTokenFlatform {
+public enum DeviceTokenPlatform {
     ANDROID,
     IOS,
     WEB

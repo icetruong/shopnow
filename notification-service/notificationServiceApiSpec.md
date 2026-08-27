@@ -501,32 +501,6 @@ Mọi event nhận về là JSON của `KafkaEvent<T>` — **deserialize bằng 
 }
 ```
 
-**Cấu hình consumer (đồng bộ convention với order-service / shipping-service):**
-```properties
-spring.application.name=notification-service
-server.port=8088
-
-spring.kafka.bootstrap-servers=localhost:9092
-spring.kafka.consumer.group-id=notification-service
-spring.kafka.consumer.auto-offset-reset=earliest
-spring.kafka.consumer.key-deserializer=org.apache.kafka.common.serialization.StringDeserializer
-spring.kafka.consumer.value-deserializer=org.apache.kafka.common.serialization.StringDeserializer
-
-# Producer JSON (chỉ dùng nếu về sau cần publish, VD notification.sent) — giống order-service
-spring.kafka.producer.key-serializer=org.apache.kafka.common.serialization.StringSerializer
-spring.kafka.producer.value-serializer=org.springframework.kafka.support.serializer.JsonSerializer
-
-# Internal REST
-internal.secret-token=${INTERNAL_SECRET_TOKEN}
-user.service.url=http://localhost:8081
-order.service.url=http://localhost:8085
-
-spring.data.redis.host=localhost
-spring.data.redis.port=6379
-```
-
-> **group-id = `notification-service`** (không có hậu tố `-group`) — thống nhất với `groupId = "order-service"` và `group-id = shipping-service` ở các listener của 2 service kia. Mỗi service 1 consumer group riêng → nhận đủ mọi message của topic mình subscribe.
-
 ---
 
 ## Bảng mapping Event → Notification

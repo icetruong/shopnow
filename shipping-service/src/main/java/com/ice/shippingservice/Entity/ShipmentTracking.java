@@ -1,6 +1,6 @@
 package com.ice.shippingservice.Entity;
 
-import com.ice.shippingservice.Enum.ShipmentTrackingStatus;
+import com.ice.shippingservice.Enum.ShipmentStatus;
 import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.OnDelete;
@@ -34,9 +34,10 @@ public class ShipmentTracking {
     @OnDelete(action = OnDeleteAction.CASCADE) // khớp với "ON DELETE CASCADE" ở DB
     private Shipment shipment;
 
+    /** Status nội bộ đã map (cùng vocab với shipments.status). */
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 20)
-    private ShipmentTrackingStatus status;
+    private ShipmentStatus status;
 
     /** Mô tả (VD: "Đang giao hàng"). */
     @Column(name = "description", length = 255)

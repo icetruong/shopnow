@@ -8,13 +8,12 @@ import java.util.UUID;
 
 @Entity
 @Table(
-        name = "shipments",
-        indexes = {
-                @Index(name = "idx_shipments_order_id", columnList = "order_id", unique = true),
-                @Index(name = "idx_shipments_tracking_code", columnList = "tracking_code", unique = true),
-                @Index(name = "idx_shipments_status", columnList = "status"),
-                @Index(name = "idx_shipments_carrier", columnList = "carrier"),
-                @Index(name = "idx_shipments_user_id", columnList = "user_id")
+        name = "processed_shipping_webhooks",
+        uniqueConstraints = {
+                @UniqueConstraint(
+                        name = "idx_processed_shipping_webhooks_key",
+                        columnNames = {"idempotency_key"}
+                )
         }
 )
 @Getter

@@ -1,4 +1,9 @@
 package com.ice.shippingservice.Repository;
 
-public interface ShippingRepo {
+import com.ice.shippingservice.Entity.Shipment;
+import org.springframework.data.jpa.repository.JpaRepository;
+
+import java.util.UUID;
+
+public interface ShipmentRepo extends JpaRepository<Shipment, UUID> {
 }

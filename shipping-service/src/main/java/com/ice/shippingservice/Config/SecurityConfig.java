@@ -5,6 +5,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
@@ -27,6 +28,15 @@ public class SecurityConfig {
                 )
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/api/v1/internal/**").permitAll()
+                        // Webhook nhà vận chuyển - xác thực bằng chữ ký trong controller, không qua JWT
+                        .requestMatchers("/api/v1/shipping/webhook/**").permitAll()
+                        // Proxy master-data GHN - public để đổ dropdown địa chỉ
+                        .requestMatchers(HttpMethod.GET,
+                                "/api/v1/shipping/provinces",
+                                "/api/v1/shipping/districts",
+                                "/api/v1/shipping/wards").permitAll()
+                        // Tra cứu đơn bằng mã vận đơn - public
+                        .requestMatchers(HttpMethod.GET, "/api/v1/shipments/*/track").permitAll()
                         .requestMatchers("/api/v1/admin/**").hasRole("ADMIN")
                         .anyRequest().authenticated()
                 )
