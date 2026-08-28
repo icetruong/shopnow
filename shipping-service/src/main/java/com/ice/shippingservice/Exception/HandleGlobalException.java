@@ -58,4 +58,10 @@ public class HandleGlobalException {
         return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
                 .body(ApiResponse.fail(ex.getMessage(), ErrorCode.FEE_CALCULATION_FAILED.name()));
     }
+
+    @ExceptionHandler(OrderServiceUnavailableException.class)
+    public ResponseEntity<ApiResponse<Void>> handleOrderServiceUnavailable(OrderServiceUnavailableException ex) {
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                .body(ApiResponse.fail(ex.getMessage(), ErrorCode.ORDER_SERVICE_UNAVAILABLE.name()));
+    }
 }
