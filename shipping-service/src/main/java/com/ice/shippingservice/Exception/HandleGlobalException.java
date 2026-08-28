@@ -64,4 +64,10 @@ public class HandleGlobalException {
         return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
                 .body(ApiResponse.fail(ex.getMessage(), ErrorCode.ORDER_SERVICE_UNAVAILABLE.name()));
     }
+
+    @ExceptionHandler(InvalidWebhookException.class)
+    public ResponseEntity<ApiResponse<Void>> handleInvalidWebhook(InvalidWebhookException ex) {
+        return ResponseEntity.badRequest()
+                .body(ApiResponse.fail(ex.getMessage(), ErrorCode.INVALID_WEBHOOK.name()));
+    }
 }

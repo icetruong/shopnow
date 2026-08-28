@@ -6,4 +6,5 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import java.util.UUID;
 
 public interface ProcessedShippingWebhookRepo extends JpaRepository<ProcessedShippingWebhook, UUID> {
+    boolean existsByIdempotencyKey(String idempotencyKey);
 }
