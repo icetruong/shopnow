@@ -10,10 +10,7 @@ import com.ice.shippingservice.DTO.Event.Consume.OrderConfirmPayload;
 import com.ice.shippingservice.DTO.Event.Publish.ShipmentUpdatePayload;
 import com.ice.shippingservice.DTO.Request.ShippingFeeRequest;
 import com.ice.shippingservice.DTO.Response.Order.OrderDetailResponse;
-import com.ice.shippingservice.DTO.Response.Shipping.ShipmentResponse;
-import com.ice.shippingservice.DTO.Response.Shipping.ShipmentTimelineResponse;
-import com.ice.shippingservice.DTO.Response.Shipping.ShipmentTrackResponse;
-import com.ice.shippingservice.DTO.Response.Shipping.ShippingFeeResponse;
+import com.ice.shippingservice.DTO.Response.Shipping.*;
 import com.ice.shippingservice.Entity.LocationMapping;
 import com.ice.shippingservice.Entity.Shipment;
 import com.ice.shippingservice.Entity.ShipmentTracking;
@@ -26,15 +23,22 @@ import com.ice.shippingservice.Exception.ShipmentAccessDeniedException;
 import com.ice.shippingservice.Exception.ShipmentNotFoundException;
 import com.ice.shippingservice.Repository.ShipmentRepo;
 import com.ice.shippingservice.Repository.ShipmentTrackingRepo;
+import com.ice.shippingservice.Specification.ShipmentSpecification;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -215,6 +219,53 @@ public class ShippingService {
         redisTemplate.opsForValue().set(cacheKey, response, TRACK_CACHE_TTL);
 
         return response;
+    }
+
+    @Transactional
+    public ShipmentReprintLabelResponse reprintLabel(String shipmentId) {
+        Shipment shipment = shipmentRepo.findById(UUID.fromString(shipmentId))
+                .orElseThrow(() -> new ShipmentNotFoundException("Không tìm thấy vận đơn " + shipmentId));
+
+        if (shipment.getTrackingCode() == null) {
+            throw new IllegalStateException(
+                    "Vận đơn chưa được tạo với nhà vận chuyển, chưa có nhãn (status="
+                            + shipment.getStatus() + ").");
+        }
+
+        String labelUrl = carrierClientFactory.forCarrier(CarrierType.valueOf(shipment.getCarrier()))
+                .getLabelUrl(shipment.getTrackingCode());
+
+        shipment.setShippingLabelUrl(labelUrl);
+        shipmentRepo.save(shipment);
+
+        return new ShipmentReprintLabelResponse(labelUrl);
+    }
+
+    /** GET /admin/shipments: danh sách vận đơn cho admin, filter + phân trang, sort createdAt desc. */
+    public AdminShipmentPageResponse getShipmentPageAdmin(
+            int page, int size, ShipmentStatus status, String carrier, String failureReason,
+            String keyword, String orderId, String userId, LocalDate startDate, LocalDate endDate) {
+
+        Specification<Shipment> spec = Specification
+                .where(ShipmentSpecification.hasStatus(status))
+                .and(ShipmentSpecification.hasCarrier(carrier))
+                .and(ShipmentSpecification.hasFailureReason(failureReason))
+                .and(ShipmentSpecification.hasKeyword(keyword))
+                .and(ShipmentSpecification.hasOrderId(orderId == null ? null : UUID.fromString(orderId)))
+                .and(ShipmentSpecification.hasUserId(userId == null ? null : UUID.fromString(userId)))
+                .and(ShipmentSpecification.betweenDays(
+                        startDate == null ? null : startDate.atStartOfDay(),
+                        endDate == null ? null : endDate.atTime(LocalTime.MAX)));
+
+        Page<Shipment> shipmentPage = shipmentRepo.findAll(
+                spec, PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt")));
+
+        List<AdminShipmentItemResponse> content = shipmentPage.getContent().stream()
+                .map(AdminShipmentItemResponse::from)
+                .toList();
+
+        return new AdminShipmentPageResponse(
+                content, page, shipmentPage.getTotalElements(), shipmentPage.getTotalPages());
     }
 
     /** Kết quả tạo vận đơn cho POST /internal/shipments (phân biệt tạo mới vs đã tồn tại). */
