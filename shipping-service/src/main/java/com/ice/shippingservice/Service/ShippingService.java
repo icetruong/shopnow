@@ -10,6 +10,8 @@ import com.ice.shippingservice.DTO.Event.Consume.OrderConfirmPayload;
 import com.ice.shippingservice.DTO.Event.Publish.ShipmentUpdatePayload;
 import com.ice.shippingservice.DTO.Request.ShippingFeeRequest;
 import com.ice.shippingservice.DTO.Response.Order.OrderDetailResponse;
+import com.ice.shippingservice.DTO.Response.Shipping.ShipmentResponse;
+import com.ice.shippingservice.DTO.Response.Shipping.ShipmentTimelineResponse;
 import com.ice.shippingservice.DTO.Response.Shipping.ShippingFeeResponse;
 import com.ice.shippingservice.Entity.LocationMapping;
 import com.ice.shippingservice.Entity.Shipment;
@@ -20,6 +22,7 @@ import com.ice.shippingservice.Exception.CarrierApiException;
 import com.ice.shippingservice.Exception.FeeCalculationException;
 import com.ice.shippingservice.Exception.CarrierCannotCancelException;
 import com.ice.shippingservice.Exception.ResourceNotFoundException;
+import com.ice.shippingservice.Exception.ShipmentAccessDeniedException;
 import com.ice.shippingservice.Repository.ShipmentRepo;
 import com.ice.shippingservice.Repository.ShipmentTrackingRepo;
 import lombok.RequiredArgsConstructor;
@@ -147,6 +150,34 @@ public class ShippingService {
 
         // 11
         markProcessed(eventId);
+    }
+
+    public ShipmentResponse getShipment(String orderId, String userId) {
+        Shipment shipment = shipmentRepo.findByOrderId(UUID.fromString(orderId))
+                .orElseThrow(() -> new ResourceNotFoundException("not found shipment by orderId: " + orderId));
+
+        if (!shipment.getUserId().equals(UUID.fromString(userId)))
+            throw new ShipmentAccessDeniedException("Vận đơn không thuộc về bạn");
+
+        List<ShipmentTracking> shipmentTrackings =
+                shipmentTrackingRepo.findAllByShipmentIdOrderByHappenedAtAsc(shipment.getId());
+
+        return new ShipmentResponse(
+                shipment.getId().toString(),
+                shipment.getOrderId().toString(),
+                shipment.getCarrier(),
+                shipment.getTrackingCode(),
+                shipment.getStatus().name(),
+                shipment.getEstimatedDate(),
+                shipmentTrackings.stream()
+                        .map(shipmentTracking -> new ShipmentTimelineResponse(
+                                shipmentTracking.getStatus().name(),
+                                shipmentTracking.getDescription(),
+                                shipmentTracking.getLocation(),
+                                shipmentTracking.getHappenedAt()
+                        ))
+                        .toList()
+        );
     }
 
     /** Kết quả tạo vận đơn cho POST /internal/shipments (phân biệt tạo mới vs đã tồn tại). */

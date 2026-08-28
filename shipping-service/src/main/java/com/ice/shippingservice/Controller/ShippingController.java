@@ -5,12 +5,15 @@ import com.ice.shippingservice.DTO.Location.ProvinceResponse;
 import com.ice.shippingservice.DTO.Location.WardResponse;
 import com.ice.shippingservice.DTO.Request.ShippingFeeRequest;
 import com.ice.shippingservice.DTO.Response.Common.ApiResponse;
+import com.ice.shippingservice.DTO.Response.Shipping.ShipmentResponse;
 import com.ice.shippingservice.DTO.Response.Shipping.ShippingFeeResponse;
 import com.ice.shippingservice.Service.LocationService;
 import com.ice.shippingservice.Service.ShippingService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -55,6 +58,19 @@ public class ShippingController {
     {
         return ResponseEntity.ok(
                 ApiResponse.success("OK", locationService.getWards(districtId))
+        );
+    }
+
+    @GetMapping("/shipments/order/{orderId}")
+    public ResponseEntity<ApiResponse<ShipmentResponse>> getShipment(@PathVariable String orderId, Authentication authentication)
+    {
+        Jwt jwt = (Jwt) authentication.getPrincipal();
+        String userId = jwt.getClaimAsString("userId");
+        return ResponseEntity.ok(
+                ApiResponse.success(
+                        "Lấy thông tin vận đơn thành công",
+                        shippingService.getShipment(orderId, userId)
+                )
         );
     }
 }

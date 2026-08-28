@@ -249,16 +249,92 @@ Lấy thông tin vận đơn theo orderId (client theo dõi đơn).
 ---
 
 ### GET /shipments/{trackingCode}/track
-Track đơn theo mã vận đơn (endpoint public, không cần login — cho phép tra cứu bằng mã).
+Tra cứu hành trình đơn theo **mã vận đơn** — endpoint **public, không cần đăng nhập**. Dùng cho:
+- Trang "Tra cứu đơn hàng" cho khách vãng lai (chưa/không login).
+- Link theo dõi gửi qua email/SMS ("Theo dõi đơn của bạn").
+- Widget tracking nhúng ngoài app.
 
-**Response 200:** Giống `data` ở trên (không kèm `orderId`).
+**Header:** _(không có — public)_
 
-**Flow:**
+**Path param**
+
+| Param | Kiểu | Ghi chú |
+|-------|------|---------|
+| `trackingCode` | string | Mã vận đơn nhà vận chuyển in trên bill (VD `GHN123456789`). Khớp chính xác, phân biệt HOA/thường theo đúng mã carrier trả. |
+
+**Response 200**
+```json
+{
+  "success": true,
+  "message": "OK",
+  "data": {
+    "trackingCode":  "GHN123456789",
+    "carrier":       "GHN",
+    "status":        "IN_TRANSIT",
+    "estimatedDate": "2024-01-17",
+    "timeline": [
+      {
+        "status":    "READY_TO_PICK",
+        "description":"Đơn hàng đã tạo, chờ lấy hàng",
+        "location":  "Kho ShopNow Q1",
+        "at":        "2024-01-15T11:00:00Z"
+      },
+      {
+        "status":    "PICKED_UP",
+        "description":"Đã lấy hàng",
+        "location":  "Kho GHN HCM",
+        "at":        "2024-01-15T15:00:00Z"
+      },
+      {
+        "status":    "IN_TRANSIT",
+        "description":"Đang vận chuyển",
+        "location":  "Trung tâm phân loại GHN",
+        "at":        "2024-01-16T08:00:00Z"
+      }
+    ]
+  }
+}
 ```
-1. Đọc từ DB (shipment_tracking) — trạng thái mới nhất đã lưu từ webhook
-2. Nếu cần realtime → gọi API track của nhà vận chuyển
-   - GHN:  POST /v2/shipping-order/detail
-   - GHTK: GET  /services/shipment/v2/{trackingCode}
+
+**Khác gì so với `GET /shipments/order/{orderId}`** — cùng một vận đơn, nhưng bản public bị lược bớt và đổi cách định danh / xác thực:
+
+| Tiêu chí | `GET /shipments/order/{orderId}` | `GET /shipments/{trackingCode}/track` |
+|----------|----------------------------------|--------------------------------------|
+| Định danh | `orderId` — UUID nội bộ ShopNow | `trackingCode` — mã carrier in trên bill |
+| Auth | `Authorization: Bearer` **bắt buộc**; check `shipments.user_id == token` hoặc `ROLE_ADMIN` | **Không** — ai có mã đều tra được |
+| Đối tượng | User đã login (màn "Đơn của tôi"), admin | Khách vãng lai, link chia sẻ, widget ngoài |
+| `data.shipmentId` | ✅ có | ❌ bỏ (UUID nội bộ) |
+| `data.orderId` | ✅ có | ❌ bỏ (không lộ mapping order) |
+| `data.carrier` / `trackingCode` / `status` / `estimatedDate` | ✅ | ✅ |
+| `data.timeline[]` (`status`/`description`/`location`/`at`) | ✅ | ✅ |
+| Xem được khi shipment còn `PENDING` (chưa có `trackingCode`) | ✅ (tra bằng `orderId`) | ❌ (chưa có mã để tra) |
+| Nguồn dữ liệu | Chỉ DB | DB, + tuỳ chọn gọi carrier realtime (xem Flow) |
+| Not found | 404 `SHIPMENT_NOT_FOUND` | 404 `SHIPMENT_NOT_FOUND` (không phân biệt mã sai / không tồn tại / PENDING → chống dò mã) |
+| Rate limit | Theo user | Theo **IP** (VD 30 req/phút/IP; vượt → `429`) |
+
+> `ShipmentResponse` hiện **không** chứa tên/SĐT/địa chỉ người nhận, phí ship hay COD, nên phần field còn lại chia sẻ công khai được. Nếu sau này nhét field nhạy cảm vào `ShipmentResponse`, endpoint này **phải** tách DTO riêng (`ShipmentTrackingResponse`) chứ không tái dùng.
+
+**Response 404** — không tìm thấy mã vận đơn (`SHIPMENT_NOT_FOUND`)
+```json
+{ "success": false, "code": "SHIPMENT_NOT_FOUND", "message": "Không tìm thấy vận đơn với mã này." }
+```
+
+**Flow bên trong**
+```
+1. Tìm shipment theo tracking_code (UNIQUE idx_shipments_tracking_code).
+   Không có → 404 SHIPMENT_NOT_FOUND.
+2. Đọc timeline: shipment_tracking WHERE shipment_id = ? ORDER BY happened_at ASC.
+3. (Tuỳ chọn) REALTIME — chỉ khi status chưa kết thúc (DELIVERED/RETURNED/CANCELLED)
+   và bản ghi tracking mới nhất cũ hơn N phút:
+   gọi carrier.getTracking(trackingCode)
+     - GHN:  POST /v2/shipping-order/detail
+     - GHTK: GET  /services/shipment/v2/{trackingCode}
+   → INSERT event mới vào shipment_tracking (idempotent theo idempotency_key như webhook),
+     UPDATE shipments.status nếu tiến theo state machine.
+   Lỗi carrier → bỏ qua, vẫn trả data từ DB (KHÔNG trả 502).
+   carrier.mode=mock → bỏ hẳn bước này (getTracking chỉ đọc lại DB).
+4. Cache Redis shipping:track:{trackingCode} TTL 60s (giảm tải, chống spam tra cứu).
+5. Build data (KHÔNG kèm shipmentId/orderId) → 200.
 ```
 
 ---
@@ -713,6 +789,7 @@ CREATE UNIQUE INDEX idx_processed_shipping_webhooks_key ON processed_shipping_we
 | `shipping:provinces` | JSON list | 24 giờ | Cache tỉnh/thành |
 | `shipping:districts:{provinceId}` | JSON list | 24 giờ | Cache quận/huyện |
 | `shipping:wards:{districtId}` | JSON list | 24 giờ | Cache phường/xã |
+| `shipping:track:{trackingCode}` | JSON `data` | 60 giây | Cache kết quả `GET /shipments/{trackingCode}/track` (public, chống spam) |
 | `processed:event:{eventId}` | `"1"` | 24 giờ | Idempotency Kafka consumer (giống order-service) |
 
 ---
