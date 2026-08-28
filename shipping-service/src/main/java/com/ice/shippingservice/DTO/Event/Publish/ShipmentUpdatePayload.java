@@ -5,7 +5,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
-import java.time.Instant;
+import java.time.LocalDate;
 
 @Getter
 @Setter
@@ -18,5 +18,5 @@ public class ShipmentUpdatePayload {
     private String carrier;
     private String status;
     private String description;
-    private Instant estimatedDate;
+    private LocalDate estimatedDate;
 }

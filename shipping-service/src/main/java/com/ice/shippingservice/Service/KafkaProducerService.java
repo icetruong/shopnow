@@ -25,6 +25,6 @@ public class KafkaProducerService {
                 payload
         );
 
-        kafkaTemplate.send(SHIPMENT_UPDATE, payload.getShipmentId(), event);
+        kafkaTemplate.send(SHIPMENT_UPDATE, payload.getOrderId(), event);
     }
 }

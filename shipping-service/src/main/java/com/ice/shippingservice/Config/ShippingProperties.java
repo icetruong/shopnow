@@ -12,6 +12,8 @@ import org.springframework.stereotype.Component;
 public class ShippingProperties {
     private From from = new From();
     private DefaultPackage defaultPackage = new DefaultPackage();
+    private String defaultCarrier;
+    private Integer defaultItemWeightGrams;
 
     @Getter
     @Setter
