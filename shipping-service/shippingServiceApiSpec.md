@@ -53,6 +53,7 @@ Tính phí ship trước khi checkout. Client gọi để hiển thị phí ship
 ```json
 {
   "success": true,
+  "message": "Tính phí vận chuyển thành công",
   "data": [
     {
       "carrier":       "GHN",
@@ -103,6 +104,7 @@ Lấy danh sách tỉnh/thành từ GHN (dùng để đổ dropdown địa chỉ
 ```json
 {
   "success": true,
+  "message": "Lấy danh sách tỉnh thành công",
   "data": [
     { "provinceId": 202, "provinceName": "TP. Hồ Chí Minh" },
     { "provinceId": 201, "provinceName": "Hà Nội" }
@@ -119,6 +121,7 @@ Lấy quận/huyện theo tỉnh.
 ```json
 {
   "success": true,
+  "message": "Lấy danh sách quận huyện thành công",
   "data": [
     { "districtId": 1442, "districtName": "Quận 1" },
     { "districtId": 1443, "districtName": "Quận 2" }
@@ -135,6 +138,7 @@ Lấy phường/xã theo quận.
 ```json
 {
   "success": true,
+  "message": "Lấy danh sách phường xã thành công",
   "data": [
     { "wardCode": "21012", "wardName": "Phường Bến Nghé" },
     { "wardCode": "21013", "wardName": "Phường Bến Thành" }

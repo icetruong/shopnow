@@ -52,4 +52,10 @@ public class HandleGlobalException {
         return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
                 .body(ApiResponse.fail(ex.getMessage(), ErrorCode.CARRIER_API_ERROR.name()));
     }
+
+    @ExceptionHandler(FeeCalculationException.class)
+    public ResponseEntity<ApiResponse<Void>> handleFeeCalc(FeeCalculationException ex) {
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                .body(ApiResponse.fail(ex.getMessage(), ErrorCode.FEE_CALCULATION_FAILED.name()));
+    }
 }

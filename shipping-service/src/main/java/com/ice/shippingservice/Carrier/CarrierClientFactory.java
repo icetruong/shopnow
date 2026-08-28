@@ -40,4 +40,12 @@ public class CarrierClientFactory {
         }
         return client;
     }
+
+    public List<CarrierClient> forFeeQuote()
+    {
+        if (MODE_MOCK.equalsIgnoreCase(mode)) {
+            return List.of(mockClient);              // mock: 1 client đại diện tất cả
+        }
+        return List.copyOf(realClients.values());
+    }
 }
