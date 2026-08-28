@@ -5,6 +5,7 @@ import com.ice.shippingservice.Carrier.CarrierClientFactory;
 import com.ice.shippingservice.Client.OrderClient;
 import com.ice.shippingservice.Config.ShippingProperties;
 import com.ice.shippingservice.DTO.Carrier.*;
+import com.ice.shippingservice.DTO.Event.Consume.OrderCancelledPayload;
 import com.ice.shippingservice.DTO.Event.Consume.OrderConfirmPayload;
 import com.ice.shippingservice.DTO.Event.Consume.OrderItemEvent;
 import com.ice.shippingservice.DTO.Event.Consume.ShippingAddressEvent;
@@ -19,6 +20,7 @@ import com.ice.shippingservice.Enum.CarrierType;
 import com.ice.shippingservice.Enum.ShipmentStatus;
 import com.ice.shippingservice.Exception.CarrierApiException;
 import com.ice.shippingservice.Exception.FeeCalculationException;
+import com.ice.shippingservice.Exception.CarrierCannotCancelException;
 import com.ice.shippingservice.Repository.ShipmentRepo;
 import com.ice.shippingservice.Repository.ShipmentTrackingRepo;
 import lombok.RequiredArgsConstructor;
@@ -225,6 +227,90 @@ public class ShippingService {
         ));
 
         markProcessed(eventId);
+    }
+
+    @Transactional
+    public void orderCancelled(OrderCancelledPayload payload, String eventId)
+    {
+        UUID orderId = UUID.fromString(payload.getOrderId());
+
+        if(Boolean.TRUE.equals(stringRedisTemplate.hasKey(PROCESSED_KEY + eventId)))
+        {
+            log.info("event {} đã xử lý, bỏ qua", eventId);
+            return;
+        }
+
+        // Không có shipment -> order bị hủy trước khi kịp tạo vận đơn -> coi như xong
+        Optional<Shipment> opt = shipmentRepo.findByOrderId(orderId);
+        if(opt.isEmpty())
+        {
+            log.info("order {} chưa có shipment, bỏ qua order.cancelled", orderId);
+            markProcessed(eventId);
+            return;
+        }
+
+        Shipment shipment = opt.get();
+        ShipmentStatus status = shipment.getStatus();
+
+        // Chưa lấy hàng -> hủy được
+        if(status == ShipmentStatus.PENDING || status == ShipmentStatus.READY_TO_PICK)
+        {
+            try
+            {
+                if(shipment.getTrackingCode() != null)   // PENDING chưa có trackingCode
+                {
+                    carrierClientFactory.forCarrier(CarrierType.valueOf(shipment.getCarrier()))
+                            .cancelOrder(shipment.getTrackingCode());
+                }
+                cancelShipment(shipment, payload.getReason());
+            }
+            catch (CarrierCannotCancelException e)
+            {
+                log.warn("order {}: carrier từ chối hủy ({}), giữ nguyên - cần admin xử lý",
+                        orderId, e.getMessage());
+            }
+        }
+        // Đã lấy hàng -> không hủy được
+        else if(status == ShipmentStatus.PICKED_UP || status == ShipmentStatus.IN_TRANSIT)
+        {
+            log.warn("order {}: shipment đang {}, KHÔNG hủy được - alert admin xử lý hoàn hàng",
+                    orderId, status);
+        }
+        // còn lại (DELIVERED/FAILED/RETURNED/CANCELLED) -> không làm gì
+        else
+        {
+            log.info("order {}: shipment đang {}, bỏ qua order.cancelled", orderId, status);
+        }
+
+        markProcessed(eventId);
+    }
+
+    private void cancelShipment(Shipment shipment, String reason)
+    {
+        shipment.setStatus(ShipmentStatus.CANCELLED);
+        shipmentRepo.save(shipment);
+
+        String description = "Đơn hàng đã bị hủy" + (reason != null ? " (" + reason + ")" : "");
+
+        ShipmentTracking shipmentTracking = ShipmentTracking.builder()
+                .shipment(shipment)
+                .status(ShipmentStatus.CANCELLED)
+                .description(description)
+                .happenedAt(LocalDateTime.now())
+                .build();
+        shipmentTrackingRepo.save(shipmentTracking);
+
+        kafkaProducerService.publishShipmentUpdate(new ShipmentUpdatePayload(
+                shipment.getOrderId().toString(),
+                shipment.getId().toString(),
+                shipment.getTrackingCode(),
+                shipment.getCarrier(),
+                shipment.getStatus().name(),
+                description,
+                shipment.getEstimatedDate()
+        ));
+
+        log.info("order {}: shipment {} -> CANCELLED", shipment.getOrderId(), shipment.getId());
     }
 
     private String buildCacheKey(FeeRequest r) {
