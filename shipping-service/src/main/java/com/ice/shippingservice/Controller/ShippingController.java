@@ -6,6 +6,7 @@ import com.ice.shippingservice.DTO.Location.WardResponse;
 import com.ice.shippingservice.DTO.Request.ShippingFeeRequest;
 import com.ice.shippingservice.DTO.Response.Common.ApiResponse;
 import com.ice.shippingservice.DTO.Response.Shipping.ShipmentResponse;
+import com.ice.shippingservice.DTO.Response.Shipping.ShipmentTrackResponse;
 import com.ice.shippingservice.DTO.Response.Shipping.ShippingFeeResponse;
 import com.ice.shippingservice.Service.LocationService;
 import com.ice.shippingservice.Service.ShippingService;
@@ -70,6 +71,17 @@ public class ShippingController {
                 ApiResponse.success(
                         "Lấy thông tin vận đơn thành công",
                         shippingService.getShipment(orderId, userId)
+                )
+        );
+    }
+
+    @GetMapping("/shipments/{trackingCode}/track")
+    public ResponseEntity<ApiResponse<ShipmentTrackResponse>> trackShipment(@PathVariable String trackingCode)
+    {
+        return ResponseEntity.ok(
+                ApiResponse.success(
+                        "OK",
+                        shippingService.getShipmentTrack(trackingCode)
                 )
         );
     }

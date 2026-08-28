@@ -12,6 +12,7 @@ import com.ice.shippingservice.Util.ShipmentStatusMachine;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -32,6 +33,7 @@ public class WebhookService {
     private final ShipmentTrackingRepo shipmentTrackingRepo;
     private final ProcessedShippingWebhookRepo processedRepo;
     private final KafkaProducerService kafkaProducerService;
+    private final RedisTemplate<String, Object> redisTemplate;
 
     @Transactional
     public void process(CarrierWebhookEvent event) {
@@ -71,6 +73,9 @@ public class WebhookService {
                 .carrierStatus(event.carrierStatusRaw())
                 .happenedAt(LocalDateTime.ofInstant(event.happenedAt(), ZoneOffset.UTC))
                 .build());
+
+        // Timeline vừa đổi -> xoá cache GET /shipments/{trackingCode}/track
+        redisTemplate.delete(ShippingService.TRACK_CACHE_KEY + shipment.getTrackingCode());
 
         // 5. state machine: chỉ update + publish khi tiến hợp lệ
         if (!ShipmentStatusMachine.canAdvance(shipment.getStatus(), event.status())) {

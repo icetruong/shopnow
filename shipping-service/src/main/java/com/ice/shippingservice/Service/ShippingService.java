@@ -12,6 +12,7 @@ import com.ice.shippingservice.DTO.Request.ShippingFeeRequest;
 import com.ice.shippingservice.DTO.Response.Order.OrderDetailResponse;
 import com.ice.shippingservice.DTO.Response.Shipping.ShipmentResponse;
 import com.ice.shippingservice.DTO.Response.Shipping.ShipmentTimelineResponse;
+import com.ice.shippingservice.DTO.Response.Shipping.ShipmentTrackResponse;
 import com.ice.shippingservice.DTO.Response.Shipping.ShippingFeeResponse;
 import com.ice.shippingservice.Entity.LocationMapping;
 import com.ice.shippingservice.Entity.Shipment;
@@ -21,8 +22,8 @@ import com.ice.shippingservice.Enum.ShipmentStatus;
 import com.ice.shippingservice.Exception.CarrierApiException;
 import com.ice.shippingservice.Exception.FeeCalculationException;
 import com.ice.shippingservice.Exception.CarrierCannotCancelException;
-import com.ice.shippingservice.Exception.ResourceNotFoundException;
 import com.ice.shippingservice.Exception.ShipmentAccessDeniedException;
+import com.ice.shippingservice.Exception.ShipmentNotFoundException;
 import com.ice.shippingservice.Repository.ShipmentRepo;
 import com.ice.shippingservice.Repository.ShipmentTrackingRepo;
 import lombok.RequiredArgsConstructor;
@@ -45,6 +46,9 @@ import java.util.UUID;
 public class ShippingService {
     private static final String PROCESSED_KEY = "processed:event:";
     private static final String TRACKING_CREATED_DESC = "Đơn hàng đã tạo, chờ lấy hàng";
+    /** Cache kết quả GET /shipments/{trackingCode}/track — TTL ngắn để không stale khi có webhook mới. */
+    public static final String TRACK_CACHE_KEY = "shipping:track:";
+    private static final Duration TRACK_CACHE_TTL = Duration.ofSeconds(60);
 
     private final RedisTemplate<String, Object> redisTemplate;
     private final StringRedisTemplate stringRedisTemplate;
@@ -154,7 +158,7 @@ public class ShippingService {
 
     public ShipmentResponse getShipment(String orderId, String userId) {
         Shipment shipment = shipmentRepo.findByOrderId(UUID.fromString(orderId))
-                .orElseThrow(() -> new ResourceNotFoundException("not found shipment by orderId: " + orderId));
+                .orElseThrow(() -> new ShipmentNotFoundException("Không tìm thấy vận đơn cho đơn hàng: " + orderId));
 
         if (!shipment.getUserId().equals(UUID.fromString(userId)))
             throw new ShipmentAccessDeniedException("Vận đơn không thuộc về bạn");
@@ -178,6 +182,39 @@ public class ShippingService {
                         ))
                         .toList()
         );
+    }
+
+    public ShipmentTrackResponse getShipmentTrack(String trackingCode) {
+
+        String cacheKey = TRACK_CACHE_KEY + trackingCode;
+
+        Object cached = redisTemplate.opsForValue().get(cacheKey);
+        if (cached != null)
+            return (ShipmentTrackResponse) cached;
+
+        Shipment shipment = shipmentRepo.findByTrackingCode(trackingCode)
+                .orElseThrow(() -> new ShipmentNotFoundException("Không tìm thấy vận đơn với mã này."));
+
+        List<ShipmentTracking> shipmentTrackings =
+                shipmentTrackingRepo.findAllByShipmentIdOrderByHappenedAtAsc(shipment.getId());
+        ShipmentTrackResponse response = new ShipmentTrackResponse(
+                shipment.getCarrier(),
+                shipment.getTrackingCode(),
+                shipment.getStatus().name(),
+                shipment.getEstimatedDate(),
+                shipmentTrackings.stream()
+                        .map(shipmentTracking -> new ShipmentTimelineResponse(
+                                shipmentTracking.getStatus().name(),
+                                shipmentTracking.getDescription(),
+                                shipmentTracking.getLocation(),
+                                shipmentTracking.getHappenedAt()
+                        ))
+                        .toList()
+        );
+
+        redisTemplate.opsForValue().set(cacheKey, response, TRACK_CACHE_TTL);
+
+        return response;
     }
 
     /** Kết quả tạo vận đơn cho POST /internal/shipments (phân biệt tạo mới vs đã tồn tại). */
@@ -213,7 +250,7 @@ public class ShippingService {
     public Shipment retry(String shipmentIdStr) {
         UUID id = UUID.fromString(shipmentIdStr);
         Shipment shipment = shipmentRepo.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy shipment " + id));
+                .orElseThrow(() -> new ShipmentNotFoundException("Không tìm thấy vận đơn " + id));
 
         if (shipment.getStatus() != ShipmentStatus.PENDING) {
             throw new IllegalStateException("Chỉ retry được shipment đang PENDING (hiện tại: "
@@ -364,6 +401,7 @@ public class ShippingService {
     // HỦY VẬN ĐƠN
     // =========================================================================
 
+    /** Consumer order.cancelled: luồng tự động khi Order Service hủy đơn. Nuốt lỗi không-hủy-được (chỉ log). */
     @Transactional
     public void orderCancelled(OrderCancelledPayload payload, String eventId)
     {
@@ -384,43 +422,69 @@ public class ShippingService {
             return;
         }
 
-        Shipment shipment = opt.get();
-        ShipmentStatus status = shipment.getStatus();
-
-        // Chưa lấy hàng -> hủy được
-        if(status == ShipmentStatus.PENDING || status == ShipmentStatus.READY_TO_PICK)
+        try
         {
-            try
-            {
-                if(shipment.getTrackingCode() != null)   // PENDING chưa có trackingCode
-                {
-                    carrierClientFactory.forCarrier(CarrierType.valueOf(shipment.getCarrier()))
-                            .cancelOrder(shipment.getTrackingCode());
-                }
-                cancelShipment(shipment, payload.getReason());
-            }
-            catch (CarrierCannotCancelException e)
-            {
-                log.warn("order {}: carrier từ chối hủy ({}), giữ nguyên - cần admin xử lý",
-                        orderId, e.getMessage());
-            }
+            cancelShipmentInternal(opt.get(), payload.getReason());
         }
-        // Đã lấy hàng -> không hủy được
-        else if(status == ShipmentStatus.PICKED_UP || status == ShipmentStatus.IN_TRANSIT)
+        catch (CarrierCannotCancelException e)
         {
-            log.warn("order {}: shipment đang {}, KHÔNG hủy được - alert admin xử lý hoàn hàng",
-                    orderId, status);
-        }
-        // còn lại (DELIVERED/FAILED/RETURNED/CANCELLED) -> không làm gì
-        else
-        {
-            log.info("order {}: shipment đang {}, bỏ qua order.cancelled", orderId, status);
+            log.warn("order {}: không hủy được vận đơn ({}) - giữ nguyên, alert admin xử lý hoàn hàng",
+                    orderId, e.getMessage());
         }
 
         markProcessed(eventId);
     }
 
-    private void cancelShipment(Shipment shipment, String reason)
+    /**
+     * POST /internal/shipments/{shipmentId}/cancel: hủy tay theo shipmentId (admin / service khác).
+     * Không hủy được -> để CarrierCannotCancelException nổi lên -> 409 SHIPMENT_CANNOT_CANCEL.
+     */
+    @Transactional
+    public void cancelByShipmentId(String shipmentIdStr, String reason)
+    {
+        UUID id = UUID.fromString(shipmentIdStr);
+        Shipment shipment = shipmentRepo.findById(id)
+                .orElseThrow(() -> new ShipmentNotFoundException("Không tìm thấy vận đơn " + id));
+        cancelShipmentInternal(shipment, reason);
+    }
+
+    /**
+     * LÕI DÙNG CHUNG - hủy 1 vận đơn: guard trạng thái -> gọi carrier hủy (nếu đã có trackingCode)
+     * -> ghi CANCELLED + timeline + publish shipment.updated.
+     *
+     * - CANCELLED sẵn        -> no-op (idempotent).
+     * - PENDING / READY_TO_PICK -> hủy được.
+     * - trạng thái khác      -> ném CarrierCannotCancelException (đã lấy hàng / đã kết thúc).
+     * - carrier từ chối      -> cancelOrder() tự ném CarrierCannotCancelException.
+     *
+     * Caller quyết định nuốt hay để nổi exception (xem 2 method gọi ở trên).
+     */
+    private void cancelShipmentInternal(Shipment shipment, String reason)
+    {
+        ShipmentStatus status = shipment.getStatus();
+
+        if(status == ShipmentStatus.CANCELLED)
+        {
+            log.info("shipment {} đã CANCELLED từ trước, bỏ qua", shipment.getId());
+            return;
+        }
+        if(status != ShipmentStatus.PENDING && status != ShipmentStatus.READY_TO_PICK)
+        {
+            throw new CarrierCannotCancelException(
+                    "Shipment đang " + status + ", không thể hủy - cần xử lý hoàn hàng.");
+        }
+
+        if(shipment.getTrackingCode() != null)   // PENDING có thể chưa có trackingCode
+        {
+            carrierClientFactory.forCarrier(CarrierType.valueOf(shipment.getCarrier()))
+                    .cancelOrder(shipment.getTrackingCode());
+        }
+
+        writeCancelled(shipment, reason);
+    }
+
+    /** Persist CANCELLED + ghi timeline + publish. Tách riêng để chỉ chứa thao tác ghi. */
+    private void writeCancelled(Shipment shipment, String reason)
     {
         shipment.setStatus(ShipmentStatus.CANCELLED);
         shipmentRepo.save(shipment);

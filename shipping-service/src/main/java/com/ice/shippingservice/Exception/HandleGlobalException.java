@@ -25,6 +25,12 @@ public class HandleGlobalException {
                 .body(ApiResponse.fail(ex.getMessage(), "NOT_FOUND"));
     }
 
+    @ExceptionHandler(ShipmentNotFoundException.class)
+    public ResponseEntity<ApiResponse<Void>> handleShipmentNotFound(ShipmentNotFoundException ex) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(ApiResponse.fail(ex.getMessage(), ErrorCode.SHIPMENT_NOT_FOUND.name()));
+    }
+
     @ExceptionHandler(ShipmentAccessDeniedException.class)
     public ResponseEntity<ApiResponse<Void>> handleShipmentAccessDenied(ShipmentAccessDeniedException ex) {
         return ResponseEntity.status(HttpStatus.FORBIDDEN)

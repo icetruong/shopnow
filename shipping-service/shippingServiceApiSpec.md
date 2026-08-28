@@ -340,19 +340,29 @@ Tra cứu hành trình đơn theo **mã vận đơn** — endpoint **public, kh�
 ---
 
 ### POST /internal/shipments/{shipmentId}/cancel
-Hủy vận đơn (khi order bị hủy trước lúc lấy hàng). Nội bộ — gọi bởi consumer `order.cancelled` hoặc admin.
+Hủy vận đơn theo `shipmentId` — đường gọi **tay** (admin UI, hoặc service khác), song song với consumer `order.cancelled`.
+Cùng dùng chung phần lõi hủy (`cancelShipmentInternal`) với consumer; khác ở chỗ endpoint **để lỗi nổi lên cho caller** thay vì chỉ log.
 
 **Header:** `X-Internal-Token: {sharedSecret}`
 
-**Response 200**
+**Request Body** *(tùy chọn)*
+```json
+{ "reason": "ADMIN_CANCEL" }
+```
+> `reason` chỉ để ghi vào timeline (`"Đơn hàng đã bị hủy (ADMIN_CANCEL)"`). Bỏ trống / không gửi body → `"Đơn hàng đã bị hủy"`.
+
+**Response 200** — hủy thành công, **hoặc** shipment đã `CANCELLED` từ trước (idempotent)
 ```json
 {
   "success": true,
   "message": "Đã hủy vận đơn."
 }
 ```
+Khi hủy: gọi carrier hủy đơn (nếu đã có `trackingCode`) → `shipments.status = CANCELLED` → INSERT `shipment_tracking` → publish `shipment.updated`.
 
-**Response 409** — không hủy được
+**Response 404** — không tìm thấy `shipmentId` (`SHIPMENT_NOT_FOUND`).
+
+**Response 409** — không hủy được: shipment đang `PICKED_UP` / `IN_TRANSIT` / `DELIVERED` / `FAILED` / `RETURNED`, hoặc carrier từ chối hủy.
 ```json
 {
   "success": false,
@@ -360,6 +370,8 @@ Hủy vận đơn (khi order bị hủy trước lúc lấy hàng). Nội bộ �
   "message": "Đơn đã được lấy hàng, không thể hủy."
 }
 ```
+
+> **So với consumer `order.cancelled`:** consumer tra shipment theo `orderId`, **nuốt** `SHIPMENT_CANNOT_CANCEL` (chỉ `log.warn` + alert admin) để không làm fail cả event; endpoint này tra theo `shipmentId` và trả thẳng 404 / 409 cho caller. Xem thêm mục 5 (Consumer `order.cancelled`).
 
 ---
 
@@ -433,32 +445,108 @@ GHTK webhook — tương tự nhưng format khác.
 ---
 
 ### GET /admin/shipments
-Danh sách tất cả vận đơn, filter. **Header:** `Authorization: Bearer {accessToken}` *(ROLE_ADMIN)*
+Danh sách toàn bộ vận đơn cho trang quản trị, có filter. Dùng để admin theo dõi đơn đang giao và **lọc nhanh các đơn `PENDING` bị kẹt** (map địa chỉ fail / carrier API lỗi) để bấm retry.
 
-**Query Params**
-```
-page      = 0
-size      = 20
-carrier   = GHN
-status    = IN_TRANSIT
-startDate = 2024-01-01
-endDate   = 2024-01-31
-```
+**Header:** `Authorization: Bearer {accessToken}` *(ROLE_ADMIN)*
 
-**Response 200:** Page danh sách shipment (format `content / page / totalElements / totalPages` giống order-service).
+**Query Params** — tất cả tùy chọn; để trống thì không lọc theo tiêu chí đó
 
----
+| Param | Mặc định | Ý nghĩa |
+|-------|----------|---------|
+| `page` | `0` | Trang (0-based) |
+| `size` | `20` | Số item / trang |
+| `status` | — | `ShipmentStatus`: `PENDING`, `READY_TO_PICK`, `PICKED_UP`, `IN_TRANSIT`, `DELIVERED`, `FAILED`, `RETURNED`, `CANCELLED` |
+| `carrier` | — | `GHN` / `GHTK` |
+| `failureReason` | — | `ADDRESS_MAPPING_FAILED` / `CARRIER_API_ERROR` — lọc riêng đơn `PENDING` đang kẹt |
+| `keyword` | — | Tìm gần đúng theo `trackingCode` hoặc `orderCode` |
+| `orderId` | — | Lọc đúng 1 đơn hàng |
+| `userId` | — | Lọc đơn của đúng 1 khách |
+| `startDate` / `endDate` | — | Khoảng `createdAt`, dạng `YYYY-MM-DD` |
 
-### POST /admin/shipments/{shipmentId}/reprint-label
-In lại shipping label. **Header:** `Authorization: Bearer {accessToken}` *(ROLE_ADMIN)*
+Sắp xếp mặc định: `createdAt` giảm dần (mới nhất trước).
 
 **Response 200**
 ```json
 {
   "success": true,
+  "message": "OK",
+  "data": {
+    "content": [
+      {
+        "shipmentId":    "ship-uuid-1",
+        "orderId":       "order-uuid-1",
+        "orderCode":     "SN240115001",
+        "userId":        "user-uuid-1",
+        "carrier":       "GHN",
+        "trackingCode":  "GHN123456789",
+        "status":        "IN_TRANSIT",
+        "toName":        "Nguyen Van A",
+        "toProvince":    "TP. Hồ Chí Minh",
+        "shippingFee":   30000,
+        "codAmount":     0,
+        "estimatedDate": "2024-01-17",
+        "failureReason": null,
+        "createdAt":     "2024-01-15T10:31:00Z"
+      }
+    ],
+    "page":          0,
+    "totalElements": 8,
+    "totalPages":    1
+  }
+}
+```
+
+**Field của mỗi item**
+
+| Field | Ghi chú |
+|-------|---------|
+| `shipmentId` | ID vận đơn — dùng cho `reprint-label`, `retry`, `cancel` |
+| `orderId` / `orderCode` | Đơn hàng gốc bên Order Service |
+| `userId` | Khách đặt đơn |
+| `trackingCode` | Mã vận đơn nhà vận chuyển — `null` khi shipment còn `PENDING` (chưa tạo được đơn với carrier) |
+| `status` | Trạng thái nội bộ |
+| `toName` / `toProvince` | Tóm tắt người nhận — đủ để nhận diện trên list, chi tiết xem `GET /shipments/order/{orderId}` |
+| `shippingFee` / `codAmount` | VND |
+| `failureReason` | Chỉ khác `null` khi `status = PENDING` — lý do kẹt, quyết định có retry được không |
+| `createdAt` | Thời điểm tạo shipment |
+
+> Không giới hạn theo người gọi — admin xem được đơn của mọi khách. `userId` / `orderId` ở query param chỉ là filter tùy chọn.
+
+---
+
+### POST /admin/shipments/{shipmentId}/reprint-label
+Xin lại link PDF nhãn vận đơn (shipping label) để in — dùng khi nhãn cũ bị mất/hỏng, hoặc admin cần in lại từ máy khác. **Không** tạo lại vận đơn, chỉ lấy lại nhãn của đơn đã có.
+
+**Header:** `Authorization: Bearer {accessToken}` *(ROLE_ADMIN)*
+
+**Request:** không có body.
+
+**Flow bên trong**
+```
+1. Tìm shipment theo shipmentId. Không có → 404 SHIPMENT_NOT_FOUND.
+2. Shipment chưa có trackingCode (đang PENDING) → 409 CONFLICT
+   ("Vận đơn chưa được tạo với nhà vận chuyển, chưa có nhãn.").
+3. Gọi carrier lấy nhãn:
+   - GHN:  dựng URL in nhãn kèm token
+   - GHTK: tải file PDF về rồi lưu ra storage
+   → cập nhật shipments.shipping_label_url.
+4. Trả URL nhãn.
+```
+
+**Response 200**
+```json
+{
+  "success": true,
+  "message": "OK",
   "data": { "shippingLabel": "https://storage.shopnow.com/labels/GHN123456789.pdf" }
 }
 ```
+
+**Response 404** — không tìm thấy `shipmentId` (`SHIPMENT_NOT_FOUND`).
+
+**Response 409** — shipment còn `PENDING`, chưa có nhãn để in (`CONFLICT`).
+
+> `carrier.mode=mock`: `MockCarrierClient.getLabelUrl` trả `https://mock.local/labels/{trackingCode}.pdf`.
 
 ---
 

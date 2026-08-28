@@ -1,5 +1,6 @@
 package com.ice.shippingservice.Controller;
 
+import com.ice.shippingservice.DTO.Request.CancelShipmentRequest;
 import com.ice.shippingservice.DTO.Request.CreateShipmentRequest;
 import com.ice.shippingservice.DTO.Response.Common.ApiResponse;
 import com.ice.shippingservice.DTO.Response.Shipping.ShipmentCreateResponse;
@@ -11,6 +12,7 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -50,5 +52,20 @@ public class InternalShipmentController {
                 ApiResponse.success(
                         result.alreadyExisted() ? "Vận đơn đã tồn tại" : "Tạo vận đơn thành công",
                         ShipmentCreateResponse.from(shipment)));
+    }
+
+    /**
+     * Hủy vận đơn theo shipmentId - gọi bởi admin UI / service khác (không qua Kafka).
+     * 200 nếu hủy được hoặc đã CANCELLED sẵn (idempotent); 409 SHIPMENT_CANNOT_CANCEL nếu đã lấy hàng.
+     */
+    @PostMapping("/{shipmentId}/cancel")
+    public ResponseEntity<ApiResponse<Void>> cancel(
+            @PathVariable String shipmentId,
+            @RequestBody(required = false) CancelShipmentRequest request) {
+
+        String reason = request != null ? request.getReason() : null;
+        shippingService.cancelByShipmentId(shipmentId, reason);
+
+        return ResponseEntity.ok(ApiResponse.<Void>success("Đã hủy vận đơn.", null));
     }
 }
