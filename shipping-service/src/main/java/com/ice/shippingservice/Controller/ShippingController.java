@@ -1,8 +1,12 @@
 package com.ice.shippingservice.Controller;
 
+import com.ice.shippingservice.DTO.Location.DistrictResponse;
+import com.ice.shippingservice.DTO.Location.ProvinceResponse;
+import com.ice.shippingservice.DTO.Location.WardResponse;
 import com.ice.shippingservice.DTO.Request.ShippingFeeRequest;
 import com.ice.shippingservice.DTO.Response.Common.ApiResponse;
 import com.ice.shippingservice.DTO.Response.Shipping.ShippingFeeResponse;
+import com.ice.shippingservice.Service.LocationService;
 import com.ice.shippingservice.Service.ShippingService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -17,6 +21,7 @@ import java.util.List;
 public class ShippingController {
 
     private final ShippingService shippingService;
+    private final LocationService locationService;
 
     @PostMapping("/shipping/calculate-fee")
     public ResponseEntity<ApiResponse<List<ShippingFeeResponse>>> calculateFee(@Valid @RequestBody ShippingFeeRequest request)
@@ -26,6 +31,30 @@ public class ShippingController {
                         "Tính phí vận chuyển thành công",
                         shippingService.calculateFee(request)
                 )
+        );
+    }
+
+    @GetMapping("/shipping/provinces")
+    public ResponseEntity<ApiResponse<List<ProvinceResponse>>> provinces()
+    {
+        return ResponseEntity.ok(
+                ApiResponse.success("OK", locationService.getProvinces())
+        );
+    }
+
+    @GetMapping("/shipping/districts")
+    public ResponseEntity<ApiResponse<List<DistrictResponse>>> districts(@RequestParam Integer provinceId)
+    {
+        return ResponseEntity.ok(
+                ApiResponse.success("OK", locationService.getDistricts(provinceId))
+        );
+    }
+
+    @GetMapping("/shipping/wards")
+    public ResponseEntity<ApiResponse<List<WardResponse>>> wards(@RequestParam Integer districtId)
+    {
+        return ResponseEntity.ok(
+                ApiResponse.success("OK", locationService.getWards(districtId))
         );
     }
 }

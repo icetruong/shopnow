@@ -70,4 +70,16 @@ public class HandleGlobalException {
         return ResponseEntity.badRequest()
                 .body(ApiResponse.fail(ex.getMessage(), ErrorCode.INVALID_WEBHOOK.name()));
     }
+
+    @ExceptionHandler(AddressMappingFailedException.class)
+    public ResponseEntity<ApiResponse<Void>> handleAddressMappingFailed(AddressMappingFailedException ex) {
+        return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY)
+                .body(ApiResponse.fail(ex.getMessage(), ErrorCode.ADDRESS_MAPPING_FAILED.name()));
+    }
+
+    @ExceptionHandler(IllegalStateException.class)
+    public ResponseEntity<ApiResponse<Void>> handleIllegalState(IllegalStateException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(ApiResponse.fail(ex.getMessage(), "CONFLICT"));
+    }
 }

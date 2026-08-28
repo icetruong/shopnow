@@ -1,0 +1,76 @@
+[
+  {
+    "provinceId": 202,
+    "provinceName": "TP. Hồ Chí Minh",
+    "districts": [
+      {
+        "districtId": 1442,
+        "districtName": "Quận 1",
+        "wards": [
+          { "wardCode": "21012", "wardName": "Phường Bến Nghé" },
+          { "wardCode": "21013", "wardName": "Phường Bến Thành" },
+          { "wardCode": "21014", "wardName": "Phường Cầu Kho" }
+        ]
+      },
+      {
+        "districtId": 1443,
+        "districtName": "Quận 3",
+        "wards": [
+          { "wardCode": "21112", "wardName": "Phường Võ Thị Sáu" },
+          { "wardCode": "21113", "wardName": "Phường 1" }
+        ]
+      },
+      {
+        "districtId": 1446,
+        "districtName": "Quận Bình Thạnh",
+        "wards": [
+          { "wardCode": "21203", "wardName": "Phường 12" },
+          { "wardCode": "21204", "wardName": "Phường 13" }
+        ]
+      }
+    ]
+  },
+  {
+    "provinceId": 201,
+    "provinceName": "Hà Nội",
+    "districts": [
+      {
+        "districtId": 1482,
+        "districtName": "Quận Ba Đình",
+        "wards": [
+          { "wardCode": "10101", "wardName": "Phường Trúc Bạch" },
+          { "wardCode": "10102", "wardName": "Phường Cống Vị" }
+        ]
+      },
+      {
+        "districtId": 1490,
+        "districtName": "Quận Hoàn Kiếm",
+        "wards": [
+          { "wardCode": "10201", "wardName": "Phường Hàng Bạc" },
+          { "wardCode": "10202", "wardName": "Phường Hàng Bồ" }
+        ]
+      }
+    ]
+  },
+  {
+    "provinceId": 224,
+    "provinceName": "Bình Dương",
+    "districts": [
+      {
+        "districtId": 1725,
+        "districtName": "Thành phố Thủ Dầu Một",
+        "wards": [
+          { "wardCode": "70101", "wardName": "Phường Phú Cường" },
+          { "wardCode": "70102", "wardName": "Phường Phú Hòa" }
+        ]
+      },
+      {
+        "districtId": 1726,
+        "districtName": "Thành phố Dĩ An",
+        "wards": [
+          { "wardCode": "70201", "wardName": "Phường Dĩ An" }
+        ]
+      }
+    ]
+  }
+]
