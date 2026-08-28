@@ -1,6 +1,7 @@
 package com.ice.shippingservice.Exception;
 
 import com.ice.shippingservice.DTO.Response.Common.ApiResponse;
+import com.ice.shippingservice.Enum.ErrorCode;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -36,5 +37,19 @@ public class HandleGlobalException {
 
         return ResponseEntity.badRequest()
                 .body(ApiResponse.fail(message, "INVALID_REQUEST"));
+    }
+
+    @ExceptionHandler(CarrierCannotCancelException.class)
+    public ResponseEntity<ApiResponse<Void>> handleCarrierCannotCancel(CarrierCannotCancelException ex)
+    {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(ApiResponse.fail(ex.getMessage(), ErrorCode.SHIPMENT_CANNOT_CANCEL.name()));
+    }
+
+    @ExceptionHandler(CarrierApiException.class)
+    public ResponseEntity<ApiResponse<Void>> handleCarrierApi(CarrierApiException ex)
+    {
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                .body(ApiResponse.fail(ex.getMessage(), ErrorCode.CARRIER_API_ERROR.name()));
     }
 }

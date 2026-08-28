@@ -1,4 +1,8 @@
 package com.ice.shippingservice.DTO.Carrier;
 
-public record ResolveServiceRequest() {
+public record ResolveServiceRequest(
+        int fromDistrictId,
+        int toDistrictId,
+        int weightGram
+) {
 }
