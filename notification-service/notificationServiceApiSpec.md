@@ -91,6 +91,7 @@ Lấy số thông báo chưa đọc (hiển thị badge trên chuông).
 ```json
 {
   "success": true,
+  "message": "Lấy số thông báo chưa đọc thành công",
   "data": {
     "unreadCount": 3
   }

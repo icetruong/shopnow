@@ -2,16 +2,21 @@ package com.ice.notificationservice.Service;
 
 import com.ice.notificationservice.DTO.Response.Notification.NotificationPageResponse;
 import com.ice.notificationservice.DTO.Response.Notification.NotificationResponse;
+import com.ice.notificationservice.DTO.Response.Notification.NotificationUnreadCountResponse;
 import com.ice.notificationservice.Entity.Notification;
 import com.ice.notificationservice.Enum.NotificationType;
+import com.ice.notificationservice.Exception.NotificationNotFoundException;
 import com.ice.notificationservice.Repository.NotificationRepo;
 import com.ice.notificationservice.Util.NotificationSpecification;
 import lombok.RequiredArgsConstructor;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.ZoneOffset;
 import java.util.UUID;
@@ -62,6 +67,38 @@ public class NotificationService {
                 notifications.getTotalPages(),
                 unread
         );
+    }
+
+    @Cacheable(value = "noti:unread", key = "#userId")
+    public NotificationUnreadCountResponse getUnreadCountNotification(String userId) {
+
+        long unread = notificationRepo.countByUserIdAndIsRead(UUID.fromString(userId), false);
+
+        return new NotificationUnreadCountResponse(unread);
+    }
+
+    @CacheEvict(value = "noti:unread", key = "#userId")
+    public void markRead(String notificationId, String userId) {
+        Notification notification = notificationRepo.findByIdAndUserId(UUID.fromString(notificationId), UUID.fromString(userId))
+                .orElseThrow(() -> new NotificationNotFoundException("Notification not found: " + notificationId));
+
+        notification.setIsRead(true);
+        notificationRepo.save(notification);
+    }
+
+    @Transactional
+    @CacheEvict(value = "noti:unread", key = "#userId")
+    public void markReadAll(String userId) {
+        notificationRepo.markAllReadByUserId(UUID.fromString(userId));
+    }
+
+    @Transactional
+    @CacheEvict(value = "noti:unread", key = "#userId")
+    public void deleteNotification(String notificationId, String userId) {
+        long deleted = notificationRepo.deleteByIdAndUserId(UUID.fromString(notificationId), UUID.fromString(userId));
+        if (deleted == 0) {
+            throw new NotificationNotFoundException("Notification not found: " + notificationId);
+        }
     }
 
     private int normalizeSize(int size) {
