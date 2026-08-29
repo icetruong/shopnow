@@ -1,4 +1,4 @@
-package com.ice.paymentservice.DTO.Event;
+package com.ice.notificationservice.DTO.Event.Consumer;
 
 import lombok.AllArgsConstructor;
 import lombok.Getter;

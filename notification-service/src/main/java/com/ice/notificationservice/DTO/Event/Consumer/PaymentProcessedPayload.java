@@ -1,7 +1,5 @@
-package com.ice.paymentservice.DTO.Event;
+package com.ice.notificationservice.DTO.Event.Consumer;
 
-import com.ice.paymentservice.Enum.PaymentMethod;
-import com.ice.paymentservice.Enum.PaymentStatus;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -16,8 +14,8 @@ import java.time.Instant;
 public class PaymentProcessedPayload {
     private String orderId;
     private String paymentId;
-    private PaymentStatus status;
-    private PaymentMethod method;
+    private String status;
+    private String method;
     private Long amount;
     private String transactionId;
     private Instant paidAt;
