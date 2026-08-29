@@ -1,4 +1,18 @@
 package com.ice.notificationservice.DTO.Event.Consumer;
 
-public class UserRegisterPayload {
+import lombok.AllArgsConstructor;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
+
+@Getter
+@Setter
+@AllArgsConstructor
+@NoArgsConstructor
+public class UserRegisteredPayload {
+    private String userId;
+    private String email;
+    private String fullName;
+    private String provider;
+    private String createdAt;
 }

@@ -1,4 +1,4 @@
-package com.ice.orderservice.DTO.Event.Publish;
+package com.ice.notificationservice.DTO.Event.Consumer;
 
 import lombok.AllArgsConstructor;
 import lombok.Getter;
