@@ -9,6 +9,8 @@ import com.ice.notificationservice.DTO.Response.Notification.*;
 import com.ice.notificationservice.Entity.DeviceToken;
 import com.ice.notificationservice.Entity.Notification;
 import com.ice.notificationservice.Entity.NotificationPreference;
+import com.ice.notificationservice.Enum.NotificationChannel;
+import com.ice.notificationservice.Enum.NotificationStatus;
 import com.ice.notificationservice.Enum.NotificationType;
 import com.ice.notificationservice.Exception.NotificationNotFoundException;
 import com.ice.notificationservice.Repository.DeviceTokenRepo;
@@ -26,6 +28,9 @@ import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.UUID;
@@ -189,6 +194,59 @@ public class NotificationService {
         }
 
         notificationPreferenceRepo.save(pref);
+    }
+
+    public HistoryNotificationPageResponse getHistoryNotification(int page, int size, NotificationChannel channel, NotificationStatus status, LocalDate startDate) {
+        int safePage = Math.max(page, 0);
+        int safeSize = normalizeSize(size);
+
+        LocalDateTime from = startDate == null ? null : startDate.atStartOfDay();
+
+        // baseSpec = filter chung (channel + ngày), KHÔNG gồm status.
+        Specification<Notification> baseSpec = Specification
+                .where(NotificationSpecification.hasNotificationChannel(channel))
+                .and(NotificationSpecification.greaterDate(from));
+
+        Specification<Notification> pageSpec = baseSpec
+                .and(NotificationSpecification.hasNotificationStatus(status));
+
+        Page<Notification> notifications = notificationRepo.findAll(pageSpec, PageRequest.of(safePage, safeSize, Sort.by(Sort.Direction.DESC, "createdAt")));
+
+        // stats tính theo cùng bộ lọc channel + ngày (bỏ điều kiện status của trang hiện tại).
+        long totalSent = notificationRepo.count(
+                baseSpec.and(NotificationSpecification.hasNotificationStatus(NotificationStatus.SENT)));
+        long totalFailed = notificationRepo.count(
+                baseSpec.and(NotificationSpecification.hasNotificationStatus(NotificationStatus.FAILED)));
+
+        long attempted = totalSent + totalFailed;
+        BigDecimal successRate = attempted == 0
+                ? BigDecimal.ZERO.setScale(2)
+                : BigDecimal.valueOf(totalSent)
+                        .multiply(BigDecimal.valueOf(100))
+                        .divide(BigDecimal.valueOf(attempted), 2, RoundingMode.HALF_UP);
+
+        return new HistoryNotificationPageResponse(
+                notifications.getContent().stream()
+                        .map(notification -> new HistoryNotificationResponse(
+                                notification.getId().toString(),
+                                notification.getChannel().name(),
+                                notification.getType().name(),
+                                notification.getRecipient(),
+                                notification.getStatus().name(),
+                                notification.getSentAt() == null
+                                        ? null
+                                        : notification.getSentAt().toInstant(ZoneOffset.UTC)
+                        )).toList(),
+                notifications.getNumber(),
+                notifications.getSize(),
+                notifications.getTotalElements(),
+                notifications.getTotalPages(),
+                new HistoryStatusNotificationResponse(
+                        totalSent,
+                        totalFailed,
+                        successRate
+                )
+        );
     }
 
     private int normalizeSize(int size) {

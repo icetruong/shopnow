@@ -289,6 +289,7 @@ startDate = 2024-01-01
 ```json
 {
   "success": true,
+  "message": "Lấy lịch sử gửi thông báo thành công",
   "data": {
     "content": [
       {
@@ -304,7 +305,7 @@ startDate = 2024-01-01
     "size":          20,
     "totalElements": 1262,
     "totalPages":    64,
-    "stats": {
+    "status": {
       "totalSent":   1250,
       "totalFailed": 12,
       "successRate": 99.05
@@ -471,6 +472,37 @@ body:    Xin chào {{userName}}, đơn hàng {{orderCode}} trị giá {{totalAmo
 ```sql
 CREATE UNIQUE INDEX idx_notification_templates_code ON notification_templates(code);
 ```
+
+---
+
+## Bảng: notification_broadcasts
+
+Lưu mỗi lần admin gửi thông báo hàng loạt (`POST /admin/notifications/broadcast`). 1 row = 1 "job broadcast". Việc bung ra từng user (INSERT vào `notifications`) + gửi do worker nền `BroadcastDispatchJob` xử lý; các cột đếm được worker cập nhật sau khi chạy xong.
+
+| Column | Type | Constraint | Ghi chú |
+|--------|------|-----------|---------|
+| id | UUID | PK, DEFAULT uuid_generate_v4() | = `broadcastId` trả về trong response |
+| channel | VARCHAR(20) | NOT NULL | EMAIL / SMS / PUSH / IN_APP |
+| target | VARCHAR(20) | NOT NULL | ALL / SEGMENT |
+| title | VARCHAR(255) | NOT NULL | |
+| body | TEXT | NOT NULL | |
+| image_url | TEXT | NULLABLE | |
+| action_url | VARCHAR(500) | NULLABLE | Link khi bấm vào notification |
+| schedule_at | TIMESTAMP | NULLABLE | NULL = gửi ngay; có giá trị = worker chỉ nhặt khi NOW() ≥ schedule_at |
+| status | VARCHAR(20) | NOT NULL, DEFAULT 'SCHEDULED' | SCHEDULED / PROCESSING / COMPLETED / FAILED |
+| estimated_reach | INT | NOT NULL, DEFAULT 0 | Số người nhận ước tính, tính lúc tạo |
+| sent_count | INT | NOT NULL, DEFAULT 0 | Worker cập nhật sau khi gửi |
+| failed_count | INT | NOT NULL, DEFAULT 0 | Worker cập nhật sau khi gửi |
+| created_by | UUID | NOT NULL | userId của admin (lấy từ JWT claim `userId`) |
+| created_at | TIMESTAMP | NOT NULL, DEFAULT NOW() | |
+
+**Index:**
+```sql
+CREATE INDEX idx_notification_broadcasts_status ON notification_broadcasts(status);
+CREATE INDEX idx_notification_broadcasts_schedule_at ON notification_broadcasts(schedule_at);
+```
+
+**Lưu ý:** `notifications` sinh ra từ broadcast dùng `type = 'PROMOTION'`, `status = 'PENDING'`. Không có FK cứng từ `notifications` về bảng này ở phase hiện tại — worker tự đếm sent/failed trong lúc chạy. Khi tách send worker async riêng thì thêm cột `broadcast_id` vào `notifications` để tally ngược.
 
 ---
 
