@@ -5,6 +5,7 @@ import com.ice.shippingservice.DTO.Webhook.CarrierWebhookEvent;
 import com.ice.shippingservice.DTO.Webhook.GhtkWebhookRequest;
 import com.ice.shippingservice.Enum.CarrierType;
 import com.ice.shippingservice.Enum.ShipmentStatus;
+import com.ice.shippingservice.Exception.InvalidWebhookException;
 import com.ice.shippingservice.Service.WebhookService;
 import com.ice.shippingservice.Service.WebhookSignatureVerifier;
 import com.ice.shippingservice.Util.GhtkStatusMapper;
@@ -16,6 +17,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import tools.jackson.databind.ObjectMapper;
 
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -36,13 +38,21 @@ public class GhtkWebhookController {
 
     private final WebhookService webhookService;
     private final WebhookSignatureVerifier signatureVerifier;
+    private final ObjectMapper objectMapper;
 
     @PostMapping("/ghtk")
     public ResponseEntity<ApiResponse<Void>> handle(
             @RequestHeader(value = SIGNATURE_HEADER, required = false) String signature,
-            @RequestBody GhtkWebhookRequest body) {
+            @RequestBody byte[] rawBody) {
 
-        signatureVerifier.verify(signature, SIGNATURE_HEADER);
+        signatureVerifier.verify(signature, SIGNATURE_HEADER, rawBody, CarrierType.GHTK);
+
+        GhtkWebhookRequest body;
+        try {
+            body = objectMapper.readValue(rawBody, GhtkWebhookRequest.class);
+        } catch (RuntimeException e) {
+            throw new InvalidWebhookException("Body webhook GHTK không đọc được: " + e.getMessage());
+        }
 
         ShipmentStatus status = GhtkStatusMapper.map(body.getStatusId());
         if (status == null) {

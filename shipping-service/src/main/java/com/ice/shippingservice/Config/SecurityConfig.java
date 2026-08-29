@@ -37,6 +37,8 @@ public class SecurityConfig {
                                 "/api/v1/shipping/wards").permitAll()
                         // Tra cứu đơn bằng mã vận đơn - public
                         .requestMatchers(HttpMethod.GET, "/api/v1/shipments/*/track").permitAll()
+                        // File nhãn PDF đã lưu (GHTK) - public
+                        .requestMatchers(HttpMethod.GET, "/labels/**").permitAll()
                         .requestMatchers("/api/v1/admin/**").hasRole("ADMIN")
                         .anyRequest().authenticated()
                 )

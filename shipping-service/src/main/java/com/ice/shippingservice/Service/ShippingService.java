@@ -3,6 +3,7 @@ package com.ice.shippingservice.Service;
 import com.ice.shippingservice.Carrier.CarrierClient;
 import com.ice.shippingservice.Carrier.CarrierClientFactory;
 import com.ice.shippingservice.Client.OrderClient;
+import com.ice.shippingservice.Config.CarrierProperties;
 import com.ice.shippingservice.Config.ShippingProperties;
 import com.ice.shippingservice.Config.ShippingRetryProperties;
 import com.ice.shippingservice.DTO.Carrier.*;
@@ -25,6 +26,7 @@ import com.ice.shippingservice.Exception.ShipmentNotFoundException;
 import com.ice.shippingservice.Repository.ShipmentRepo;
 import com.ice.shippingservice.Repository.ShipmentTrackingRepo;
 import com.ice.shippingservice.Specification.ShipmentSpecification;
+import com.ice.shippingservice.Util.ShipmentStatusMachine;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
@@ -36,10 +38,13 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -57,6 +62,7 @@ public class ShippingService {
     private final RedisTemplate<String, Object> redisTemplate;
     private final StringRedisTemplate stringRedisTemplate;
     private final CarrierClientFactory carrierClientFactory;
+    private final CarrierProperties carrierProperties;
     private final ShippingProperties shippingProperties;
     private final ShippingRetryProperties shippingRetryProperties;
     private final ShipmentRepo shipmentRepo;
@@ -189,6 +195,7 @@ public class ShippingService {
         );
     }
 
+    @Transactional
     public ShipmentTrackResponse getShipmentTrack(String trackingCode) {
 
         String cacheKey = TRACK_CACHE_KEY + trackingCode;
@@ -199,6 +206,9 @@ public class ShippingService {
 
         Shipment shipment = shipmentRepo.findByTrackingCode(trackingCode)
                 .orElseThrow(() -> new ShipmentNotFoundException("Không tìm thấy vận đơn với mã này."));
+
+        // (Tuỳ chọn - spec bước 3) hỏi carrier realtime khi mode=real & đơn chưa kết thúc & tracking đã cũ.
+        maybeRefreshFromCarrier(shipment);
 
         List<ShipmentTracking> shipmentTrackings =
                 shipmentTrackingRepo.findAllByShipmentIdOrderByHappenedAtAsc(shipment.getId());
@@ -220,6 +230,83 @@ public class ShippingService {
         redisTemplate.opsForValue().set(cacheKey, response, TRACK_CACHE_TTL);
 
         return response;
+    }
+
+    private static final java.util.Set<ShipmentStatus> TERMINAL_STATUSES = java.util.EnumSet.of(
+            ShipmentStatus.DELIVERED, ShipmentStatus.RETURNED, ShipmentStatus.CANCELLED);
+
+    /**
+     * Spec bước 3 của GET /track: chỉ chạy khi carrier.mode=real, đơn chưa kết thúc, đã có trackingCode,
+     * và bản ghi tracking mới nhất cũ hơn shipping.track.realtime-refresh-minutes.
+     * Lỗi carrier -> nuốt, vẫn trả dữ liệu DB (KHÔNG 502). mode=mock -> bỏ hẳn.
+     */
+    private void maybeRefreshFromCarrier(Shipment shipment) {
+        if (!"real".equalsIgnoreCase(carrierProperties.getMode())) {
+            return;
+        }
+        if (shipment.getTrackingCode() == null || TERMINAL_STATUSES.contains(shipment.getStatus())) {
+            return;
+        }
+
+        List<ShipmentTracking> existing =
+                shipmentTrackingRepo.findAllByShipmentIdOrderByHappenedAtAsc(shipment.getId());
+        LocalDateTime latest = existing.isEmpty()
+                ? null : existing.get(existing.size() - 1).getHappenedAt();
+
+        int minutes = shippingProperties.getTrack().getRealtimeRefreshMinutes();
+        if (latest != null && latest.isAfter(LocalDateTime.now().minusMinutes(minutes))) {
+            return;   // còn mới, khỏi gọi carrier
+        }
+
+        try {
+            CarrierClient client = carrierClientFactory.forCarrier(
+                    CarrierType.valueOf(shipment.getCarrier()));
+            applyRealtimeEvents(shipment, client.getTracking(shipment.getTrackingCode()), latest);
+        } catch (RuntimeException e) {
+            log.warn("Realtime refresh {} lỗi, dùng dữ liệu DB: {}",
+                    shipment.getTrackingCode(), e.getMessage());
+        }
+    }
+
+    /** INSERT các event mới hơn mốc {@code latest}; nếu tiến hợp lệ -> update status + publish shipment.updated. */
+    private void applyRealtimeEvents(Shipment shipment, List<TrackingEvent> events, LocalDateTime latest) {
+        if (events == null || events.isEmpty()) {
+            return;
+        }
+        Instant cutoff = latest != null ? latest.toInstant(ZoneOffset.UTC) : Instant.EPOCH;
+        List<TrackingEvent> fresh = events.stream()
+                .filter(e -> e.happenedAt() != null && e.happenedAt().isAfter(cutoff))
+                .sorted(Comparator.comparing(TrackingEvent::happenedAt))
+                .toList();
+        if (fresh.isEmpty()) {
+            return;
+        }
+
+        for (TrackingEvent e : fresh) {
+            shipmentTrackingRepo.save(ShipmentTracking.builder()
+                    .shipment(shipment)
+                    .status(e.status())
+                    .description(e.description())
+                    .location(e.location())
+                    .carrierStatus(e.carrierStatus())
+                    .happenedAt(LocalDateTime.ofInstant(e.happenedAt(), ZoneOffset.UTC))
+                    .build());
+        }
+
+        TrackingEvent last = fresh.get(fresh.size() - 1);
+        if (ShipmentStatusMachine.canAdvance(shipment.getStatus(), last.status())) {
+            shipment.setStatus(last.status());
+            shipmentRepo.save(shipment);
+            kafkaProducerService.publishShipmentUpdate(new ShipmentUpdatePayload(
+                    shipment.getOrderId().toString(),
+                    shipment.getId().toString(),
+                    shipment.getTrackingCode(),
+                    shipment.getCarrier(),
+                    shipment.getStatus().name(),
+                    last.description(),
+                    shipment.getEstimatedDate()));
+            log.info("Realtime refresh: shipment {} -> {}", shipment.getId(), shipment.getStatus());
+        }
     }
 
     @Transactional
