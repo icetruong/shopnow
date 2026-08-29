@@ -454,7 +454,7 @@ Danh sách toàn bộ vận đơn cho trang quản trị, có filter. Dùng đ�
 | Param | Mặc định | Ý nghĩa |
 |-------|----------|---------|
 | `page` | `0` | Trang (0-based) |
-| `size` | `20` | Số item / trang |
+| `size` | `10` | Số item / trang |
 | `status` | — | `ShipmentStatus`: `PENDING`, `READY_TO_PICK`, `PICKED_UP`, `IN_TRANSIT`, `DELIVERED`, `FAILED`, `RETURNED`, `CANCELLED` |
 | `carrier` | — | `GHN` / `GHTK` |
 | `failureReason` | — | `ADDRESS_MAPPING_FAILED` / `CARRIER_API_ERROR` — lọc riêng đơn `PENDING` đang kẹt |
@@ -463,13 +463,11 @@ Danh sách toàn bộ vận đơn cho trang quản trị, có filter. Dùng đ�
 | `userId` | — | Lọc đơn của đúng 1 khách |
 | `startDate` / `endDate` | — | Khoảng `createdAt`, dạng `YYYY-MM-DD` |
 
-Sắp xếp mặc định: `createdAt` giảm dần (mới nhất trước).
-
-**Response 200**
+**Response 200** — format `content / page / size / totalElements / totalPages` giống payment-service.
 ```json
 {
   "success": true,
-  "message": "OK",
+  "message": "Lấy danh sách vận đơn thành công",
   "data": {
     "content": [
       {
@@ -490,11 +488,14 @@ Sắp xếp mặc định: `createdAt` giảm dần (mới nhất trước).
       }
     ],
     "page":          0,
+    "size":          10,
     "totalElements": 8,
     "totalPages":    1
   }
 }
 ```
+
+> Chưa sort (giống `GET /admin/orders` / `GET /admin/payments` — `PageRequest.of(page, size)` không kèm `Sort`). Nếu cần thứ tự ổn định thì thêm `Sort.by(DESC, "createdAt")` ở cả 3 service.
 
 **Field của mỗi item**
 

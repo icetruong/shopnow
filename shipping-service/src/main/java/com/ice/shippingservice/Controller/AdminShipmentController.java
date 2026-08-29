@@ -29,24 +29,29 @@ public class AdminShipmentController {
     private final ShippingService shippingService;
 
     @GetMapping
-    public ResponseEntity<ApiResponse<AdminShipmentPageResponse>> list(
+    public ResponseEntity<ApiResponse<AdminShipmentPageResponse>> getShipmentPageAdmin(
             @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(defaultValue = "10") int size,
             @RequestParam(required = false) ShipmentStatus status,
             @RequestParam(required = false) String carrier,
             @RequestParam(required = false) String failureReason,
             @RequestParam(required = false) String keyword,
             @RequestParam(required = false) String orderId,
             @RequestParam(required = false) String userId,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
-
+            @RequestParam(required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam(required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate
+    )
+    {
         return ResponseEntity.ok(
                 ApiResponse.success(
                         "Lấy danh sách vận đơn thành công",
                         shippingService.getShipmentPageAdmin(
                                 page, size, status, carrier, failureReason,
-                                keyword, orderId, userId, startDate, endDate)));
+                                keyword, orderId, userId, startDate, endDate)
+                )
+        );
     }
 
     @PostMapping("/{shipmentId}/retry")

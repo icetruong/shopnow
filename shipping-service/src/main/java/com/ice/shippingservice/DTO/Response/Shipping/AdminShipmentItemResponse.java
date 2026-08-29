@@ -6,8 +6,9 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
+import java.time.Instant;
 import java.time.LocalDate;
-import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 
 /** 1 dòng trong danh sách GET /admin/shipments. */
 @Getter
@@ -28,7 +29,7 @@ public class AdminShipmentItemResponse {
     private Long codAmount;
     private LocalDate estimatedDate;
     private String failureReason;
-    private LocalDateTime createdAt;
+    private Instant createdAt;
 
     public static AdminShipmentItemResponse from(Shipment s) {
         return new AdminShipmentItemResponse(
@@ -45,7 +46,7 @@ public class AdminShipmentItemResponse {
                 s.getCodAmount(),
                 s.getEstimatedDate(),
                 s.getFailureReason(),
-                s.getCreatedAt()
+                s.getCreatedAt().toInstant(ZoneOffset.UTC)
         );
     }
 }

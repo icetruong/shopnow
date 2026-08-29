@@ -4,6 +4,7 @@ import com.ice.shippingservice.Carrier.CarrierClient;
 import com.ice.shippingservice.Carrier.CarrierClientFactory;
 import com.ice.shippingservice.Client.OrderClient;
 import com.ice.shippingservice.Config.ShippingProperties;
+import com.ice.shippingservice.Config.ShippingRetryProperties;
 import com.ice.shippingservice.DTO.Carrier.*;
 import com.ice.shippingservice.DTO.Event.Consume.OrderCancelledPayload;
 import com.ice.shippingservice.DTO.Event.Consume.OrderConfirmPayload;
@@ -28,7 +29,6 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
-import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -58,6 +58,7 @@ public class ShippingService {
     private final StringRedisTemplate stringRedisTemplate;
     private final CarrierClientFactory carrierClientFactory;
     private final ShippingProperties shippingProperties;
+    private final ShippingRetryProperties shippingRetryProperties;
     private final ShipmentRepo shipmentRepo;
     private final OrderClient orderClient;
     private final LocationResolver locationResolver;
@@ -241,31 +242,36 @@ public class ShippingService {
         return new ShipmentReprintLabelResponse(labelUrl);
     }
 
-    /** GET /admin/shipments: danh sách vận đơn cho admin, filter + phân trang, sort createdAt desc. */
+    /** GET /admin/shipments: danh sách vận đơn cho admin, filter + phân trang. */
     public AdminShipmentPageResponse getShipmentPageAdmin(
             int page, int size, ShipmentStatus status, String carrier, String failureReason,
             String keyword, String orderId, String userId, LocalDate startDate, LocalDate endDate) {
 
-        Specification<Shipment> spec = Specification
+        LocalDateTime start = startDate != null ? startDate.atStartOfDay() : null;
+        LocalDateTime end = endDate != null ? endDate.atTime(LocalTime.MAX) : null;
+
+        Specification<Shipment> specification = Specification
                 .where(ShipmentSpecification.hasStatus(status))
                 .and(ShipmentSpecification.hasCarrier(carrier))
                 .and(ShipmentSpecification.hasFailureReason(failureReason))
                 .and(ShipmentSpecification.hasKeyword(keyword))
-                .and(ShipmentSpecification.hasOrderId(orderId == null ? null : UUID.fromString(orderId)))
-                .and(ShipmentSpecification.hasUserId(userId == null ? null : UUID.fromString(userId)))
-                .and(ShipmentSpecification.betweenDays(
-                        startDate == null ? null : startDate.atStartOfDay(),
-                        endDate == null ? null : endDate.atTime(LocalTime.MAX)));
+                .and(ShipmentSpecification.hasOrderId(orderId != null ? UUID.fromString(orderId) : null))
+                .and(ShipmentSpecification.hasUserId(userId != null ? UUID.fromString(userId) : null))
+                .and(ShipmentSpecification.betweenDays(start, end));
 
-        Page<Shipment> shipmentPage = shipmentRepo.findAll(
-                spec, PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt")));
+        Page<Shipment> shipments = shipmentRepo.findAll(specification, PageRequest.of(page, size));
 
-        List<AdminShipmentItemResponse> content = shipmentPage.getContent().stream()
+        List<AdminShipmentItemResponse> content = shipments.stream()
                 .map(AdminShipmentItemResponse::from)
                 .toList();
 
         return new AdminShipmentPageResponse(
-                content, page, shipmentPage.getTotalElements(), shipmentPage.getTotalPages());
+                content,
+                shipments.getNumber(),
+                shipments.getSize(),
+                shipments.getTotalElements(),
+                shipments.getTotalPages()
+        );
     }
 
     /** Kết quả tạo vận đơn cho POST /internal/shipments (phân biệt tạo mới vs đã tồn tại). */
@@ -308,8 +314,10 @@ public class ShippingService {
                     + shipment.getStatus() + ")");
         }
         int retryCount = shipment.getRetryCount() == null ? 0 : shipment.getRetryCount();
-        if (retryCount >= 5) {
-            throw new IllegalStateException("Shipment đã retry >= 5 lần, cần xử lý tay");
+        int maxAttempts = shippingRetryProperties.getMaxAttempts();
+        if (retryCount >= maxAttempts) {
+            throw new IllegalStateException(
+                    "Shipment đã retry >= " + maxAttempts + " lần, cần xử lý tay");
         }
 
         OrderDetailResponse order = orderClient.getOrder(shipment.getOrderId().toString());
@@ -317,6 +325,23 @@ public class ShippingService {
 
         resolveAndDispatch(shipment, toItemLines(order));
 
+        return shipment;
+    }
+
+    @Transactional
+    public Shipment retryPending(UUID id) {
+        Shipment shipment = shipmentRepo.findById(id).orElse(null);
+        if (shipment == null || shipment.getStatus() != ShipmentStatus.PENDING) {
+            return null;   // đã bị admin/retry endpoint xử lý xen giữa
+        }
+        int retryCount = shipment.getRetryCount() == null ? 0 : shipment.getRetryCount();
+        if (retryCount >= shippingRetryProperties.getMaxAttempts()) {
+            return shipment; // hết lượt - job sẽ alert; thực ra query đã lọc nên hiếm khi vào đây
+        }
+
+        OrderDetailResponse order = orderClient.getOrder(shipment.getOrderId().toString());
+        shipment.setRetryCount(retryCount + 1);
+        resolveAndDispatch(shipment, toItemLines(order));   // tái dùng nguyên phần lõi
         return shipment;
     }
 
