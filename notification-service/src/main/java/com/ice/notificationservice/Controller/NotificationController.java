@@ -1,8 +1,10 @@
 package com.ice.notificationservice.Controller;
 
+import com.ice.notificationservice.DTO.Request.Notification.NotificationPreferenceRequest;
 import com.ice.notificationservice.DTO.Request.Notification.RegisterDeviceRequest;
 import com.ice.notificationservice.DTO.Response.Common.ApiResponse;
 import com.ice.notificationservice.DTO.Response.Notification.NotificationPageResponse;
+import com.ice.notificationservice.DTO.Response.Notification.NotificationPreferenceResponse;
 import com.ice.notificationservice.DTO.Response.Notification.NotificationUnreadCountResponse;
 import com.ice.notificationservice.Enum.NotificationType;
 import com.ice.notificationservice.Service.NotificationService;
@@ -128,6 +130,36 @@ public class NotificationController {
         return ResponseEntity.ok(
                 ApiResponse.success(
                         "Đã hủy đăng ký thiết bị.",
+                        null
+                )
+        );
+    }
+
+    @GetMapping("/preferences")
+    public ResponseEntity<ApiResponse<NotificationPreferenceResponse>> getNotificationPreference(Authentication authentication)
+    {
+        Jwt jwt = (Jwt) authentication.getPrincipal();
+        String userId = jwt.getClaimAsString("userId");
+
+        return ResponseEntity.ok(
+                ApiResponse.success(
+                        "Lấy cài đặt nhận thông báo thành công",
+                        notificationService.getPreferenceNotification(userId)
+                )
+        );
+    }
+
+    @PutMapping("/preferences")
+    public ResponseEntity<ApiResponse<Void>> putNotificationPreference(@Valid @RequestBody NotificationPreferenceRequest request, Authentication authentication)
+    {
+        Jwt jwt = (Jwt) authentication.getPrincipal();
+        String userId = jwt.getClaimAsString("userId");
+
+        notificationService.putPreferenceNotification(request, userId);
+
+        return ResponseEntity.ok(
+                ApiResponse.success(
+                        "Đã cập nhật cài đặt thông báo.",
                         null
                 )
         );
