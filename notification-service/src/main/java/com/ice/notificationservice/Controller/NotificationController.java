@@ -1,10 +1,12 @@
 package com.ice.notificationservice.Controller;
 
+import com.ice.notificationservice.DTO.Request.Notification.RegisterDeviceRequest;
 import com.ice.notificationservice.DTO.Response.Common.ApiResponse;
 import com.ice.notificationservice.DTO.Response.Notification.NotificationPageResponse;
 import com.ice.notificationservice.DTO.Response.Notification.NotificationUnreadCountResponse;
 import com.ice.notificationservice.Enum.NotificationType;
 import com.ice.notificationservice.Service.NotificationService;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
@@ -94,6 +96,38 @@ public class NotificationController {
         return ResponseEntity.ok(
                 ApiResponse.success(
                         "Đã xóa thông báo.",
+                        null
+                )
+        );
+    }
+
+    @PostMapping("/devices")
+    public ResponseEntity<ApiResponse<Void>> registerDevice(@Valid @RequestBody RegisterDeviceRequest request, Authentication authentication)
+    {
+        Jwt jwt = (Jwt) authentication.getPrincipal();
+        String userId = jwt.getClaimAsString("userId");
+
+        notificationService.registerDevice(request, userId);
+
+        return ResponseEntity.ok(
+                ApiResponse.success(
+                        "Đã đăng ký thiết bị nhận thông báo.",
+                        null
+                )
+        );
+    }
+
+    @DeleteMapping("/devices/{deviceToken}")
+    public ResponseEntity<ApiResponse<Void>> deleteDevice(@PathVariable String deviceToken, Authentication authentication)
+    {
+        Jwt jwt = (Jwt) authentication.getPrincipal();
+        String userId = jwt.getClaimAsString("userId");
+
+        notificationService.deleteDevice(deviceToken, userId);
+
+        return ResponseEntity.ok(
+                ApiResponse.success(
+                        "Đã hủy đăng ký thiết bị.",
                         null
                 )
         );

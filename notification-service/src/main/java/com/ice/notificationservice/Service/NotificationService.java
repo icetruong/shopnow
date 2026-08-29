@@ -1,11 +1,14 @@
 package com.ice.notificationservice.Service;
 
+import com.ice.notificationservice.DTO.Request.Notification.RegisterDeviceRequest;
 import com.ice.notificationservice.DTO.Response.Notification.NotificationPageResponse;
 import com.ice.notificationservice.DTO.Response.Notification.NotificationResponse;
 import com.ice.notificationservice.DTO.Response.Notification.NotificationUnreadCountResponse;
+import com.ice.notificationservice.Entity.DeviceToken;
 import com.ice.notificationservice.Entity.Notification;
 import com.ice.notificationservice.Enum.NotificationType;
 import com.ice.notificationservice.Exception.NotificationNotFoundException;
+import com.ice.notificationservice.Repository.DeviceTokenRepo;
 import com.ice.notificationservice.Repository.NotificationRepo;
 import com.ice.notificationservice.Util.NotificationSpecification;
 import lombok.RequiredArgsConstructor;
@@ -18,6 +21,7 @@ import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.UUID;
 
@@ -30,6 +34,7 @@ public class NotificationService {
     private static final int DEFAULT_PAGE_SIZE = 20;
 
     private final NotificationRepo notificationRepo;
+    private final DeviceTokenRepo deviceTokenRepo;
 
     public NotificationPageResponse getNotification(int page, int size, Boolean isRead, NotificationType type, String userId) {
 
@@ -99,6 +104,29 @@ public class NotificationService {
         if (deleted == 0) {
             throw new NotificationNotFoundException("Notification not found: " + notificationId);
         }
+    }
+
+    @Transactional
+    public void registerDevice(RegisterDeviceRequest request, String userId) {
+        // Upsert theo device_token (UNIQUE): gọi lại với cùng token -> update, không insert trùng.
+        // Cũng xử lý token đổi chủ khi user khác đăng nhập trên cùng thiết bị.
+        DeviceToken deviceToken = deviceTokenRepo.findByDeviceToken(request.getDeviceToken())
+                .orElseGet(DeviceToken::new);
+
+        deviceToken.setUserId(UUID.fromString(userId));
+        deviceToken.setDeviceToken(request.getDeviceToken());
+        deviceToken.setPlatform(request.getPlatform());
+        deviceToken.setDeviceName(request.getDeviceName());
+        deviceToken.setIsActive(true);
+        deviceToken.setLastUsedAt(LocalDateTime.now(ZoneOffset.UTC));
+
+        deviceTokenRepo.save(deviceToken);
+    }
+
+    @Transactional
+    public void deleteDevice(String deviceToken, String userId) {
+        // Idempotent: token không tồn tại / không thuộc user thì bỏ qua, logout vẫn OK.
+        deviceTokenRepo.deleteByDeviceTokenAndUserId(deviceToken, UUID.fromString(userId));
     }
 
     private int normalizeSize(int size) {

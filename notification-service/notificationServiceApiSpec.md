@@ -193,6 +193,7 @@ Lấy cài đặt nhận thông báo của user.
 ```json
 {
   "success": true,
+  "message": "Lấy cài đặt nhận thông báo thành công",
   "data": {
     "email": {
       "orderUpdates":  true,
