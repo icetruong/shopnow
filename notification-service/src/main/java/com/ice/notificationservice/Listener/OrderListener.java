@@ -4,6 +4,7 @@ import com.ice.notificationservice.DTO.Event.Consumer.KafkaEvent;
 import com.ice.notificationservice.DTO.Event.Consumer.OrderCancelledPayload;
 import com.ice.notificationservice.DTO.Event.Consumer.OrderConfirmPayload;
 import com.ice.notificationservice.DTO.Event.Consumer.OrderCreatedPayload;
+import com.ice.notificationservice.Service.OrderEventNotificationService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.kafka.annotation.KafkaListener;
@@ -16,6 +17,7 @@ import tools.jackson.databind.ObjectMapper;
 @RequiredArgsConstructor
 public class OrderListener {
     private final ObjectMapper objectMapper;
+    private final OrderEventNotificationService orderEventNotificationService;
 
     @KafkaListener(topics = "order.created", groupId = "notification-service")
     public void handleCreated(String message)
@@ -25,7 +27,7 @@ public class OrderListener {
 
         OrderCreatedPayload payload = kafkaEvent.getPayload();
 
-        // TODO: mai làm tiếp
+        orderEventNotificationService.onOrderCreated(kafkaEvent.getEventId(), payload);
     }
 
     @KafkaListener(topics = "order.confirmed", groupId = "notification-service")

@@ -37,7 +37,7 @@ public class UserClient {
                         throw new ResourceNotFoundException("User không tồn tại: " + userId);
                     })
                     .onStatus(HttpStatusCode::isError, (req, res) -> {
-                        throw new OrderServiceUnavailableException(
+                        throw new UserServiceUnavailableException(
                                 "user-service trả lỗi " + res.getStatusCode());
                     })
                     .body(InternalUserResponse.class);

@@ -19,7 +19,7 @@ public class NotificationPreferenceGateService {
         if (channel == NotificationChannel.IN_APP)
             return true;
 
-        NotificationPreference notificationPreference = notificationPreferenceRepo.findByUserId(UUID.fromString(userId))
+        NotificationPreference notificationPreference = notificationPreferenceRepo.findByUserId(userId)
                 .orElse(null);
 
         if(notificationPreference == null)
