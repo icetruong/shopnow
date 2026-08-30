@@ -36,9 +36,7 @@ public class OrderListener {
         KafkaEvent<OrderConfirmPayload> kafkaEvent =
                 objectMapper.readValue(message, new TypeReference<KafkaEvent<OrderConfirmPayload>>() {});
 
-        OrderConfirmPayload payload = kafkaEvent.getPayload();
-
-        // TODO: mai làm tiếp
+        orderEventNotificationService.onOrderConfirmed(kafkaEvent.getEventId(), kafkaEvent.getPayload());
     }
 
     @KafkaListener(topics = "order.cancelled", groupId = "notification-service")
@@ -47,8 +45,6 @@ public class OrderListener {
         KafkaEvent<OrderCancelledPayload> kafkaEvent =
                 objectMapper.readValue(message, new TypeReference<KafkaEvent<OrderCancelledPayload>>() {});
 
-        OrderCancelledPayload payload = kafkaEvent.getPayload();
-
-        // TODO: mai làm tiếp
+        orderEventNotificationService.onOrderCancelled(kafkaEvent.getEventId(), kafkaEvent.getPayload());
     }
 }

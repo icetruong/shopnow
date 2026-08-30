@@ -3,6 +3,7 @@ package com.ice.notificationservice.Listener;
 import com.ice.notificationservice.DTO.Event.Consumer.KafkaEvent;
 import com.ice.notificationservice.DTO.Event.Consumer.UserPasswordResetPayload;
 import com.ice.notificationservice.DTO.Event.Consumer.UserRegisteredPayload;
+import com.ice.notificationservice.Service.UserEventNotificationService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.kafka.annotation.KafkaListener;
@@ -15,6 +16,7 @@ import tools.jackson.databind.ObjectMapper;
 @RequiredArgsConstructor
 public class UserListener {
     private final ObjectMapper objectMapper;
+    private final UserEventNotificationService userEventNotificationService;
 
     @KafkaListener(topics = "user.password_reset_requested", groupId = "notification-service")
     public void handlePasswordReset(String message)
@@ -22,9 +24,7 @@ public class UserListener {
         KafkaEvent<UserPasswordResetPayload> kafkaEvent
                 = objectMapper.readValue(message, new TypeReference<KafkaEvent<UserPasswordResetPayload>>() {});
 
-        UserPasswordResetPayload payload = kafkaEvent.getPayload();
-
-        // TODO: mai làm tiếp
+        userEventNotificationService.onPasswordResetRequested(kafkaEvent.getEventId(), kafkaEvent.getPayload());
     }
 
     @KafkaListener(topics = "user.registered", groupId = "notification-service")
@@ -33,8 +33,6 @@ public class UserListener {
         KafkaEvent<UserRegisteredPayload> kafkaEvent =
                 objectMapper.readValue(message, new TypeReference<KafkaEvent<UserRegisteredPayload>>() {});
 
-        UserRegisteredPayload payload = kafkaEvent.getPayload();
-
-        // TODO: mai làm tiếp
+        userEventNotificationService.onUserRegistered(kafkaEvent.getEventId(), kafkaEvent.getPayload());
     }
 }

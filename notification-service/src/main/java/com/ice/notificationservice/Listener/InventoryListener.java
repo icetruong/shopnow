@@ -2,6 +2,7 @@ package com.ice.notificationservice.Listener;
 
 import com.ice.notificationservice.DTO.Event.Consumer.KafkaEvent;
 import com.ice.notificationservice.DTO.Event.Consumer.LowWarningPayload;
+import com.ice.notificationservice.Service.InventoryEventNotificationService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.kafka.annotation.KafkaListener;
@@ -14,6 +15,7 @@ import tools.jackson.databind.ObjectMapper;
 @RequiredArgsConstructor
 public class InventoryListener {
     private final ObjectMapper objectMapper;
+    private final InventoryEventNotificationService inventoryEventNotificationService;
 
     @KafkaListener(topics = "stock.low_warning", groupId = "notification-service")
     public void handleLowWarning(String message)
@@ -21,8 +23,6 @@ public class InventoryListener {
         KafkaEvent<LowWarningPayload> kafkaEvent =
                 objectMapper.readValue(message, new TypeReference<KafkaEvent<LowWarningPayload>>() {});
 
-        LowWarningPayload payload = kafkaEvent.getPayload();
-
-        // TODO: mai làm tiếp
+        inventoryEventNotificationService.onLowStockWarning(kafkaEvent.getEventId(), kafkaEvent.getPayload());
     }
 }

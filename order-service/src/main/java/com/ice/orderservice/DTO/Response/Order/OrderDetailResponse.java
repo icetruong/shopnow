@@ -14,6 +14,8 @@ import java.util.List;
 @NoArgsConstructor
 public class OrderDetailResponse {
     private String orderId;
+    /** userId chủ đơn — service nội bộ (Notification, Shipping) cần để biết gửi cho ai. */
+    private String userId;
     private String orderCode;
     private String status;
     private List<OrderItemDetailResponse> items;

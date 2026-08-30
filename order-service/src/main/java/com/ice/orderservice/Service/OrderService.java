@@ -469,6 +469,7 @@ public class OrderService {
 
         return new OrderDetailResponse(
                 order.getId().toString(),
+                order.getUserId().toString(),
                 order.getOrderCode(),
                 order.getStatus().name(),
                 items,
