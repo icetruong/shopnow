@@ -1,4 +1,9 @@
 package com.ice.reviewservice.Repository;
 
-public interface ReviewReplyRepo {
+import com.ice.reviewservice.Entity.ReviewReply;
+import org.springframework.data.jpa.repository.JpaRepository;
+
+import java.util.UUID;
+
+public interface ReviewReplyRepo extends JpaRepository<ReviewReply, UUID> {
 }
