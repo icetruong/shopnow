@@ -1,4 +1,4 @@
-package com.ice.reviewservice.Exception;
+package com.ice.promotionservice.Exception;
 
 public class ResourceNotFoundException extends RuntimeException {
     public ResourceNotFoundException(String message) {

@@ -1,6 +1,6 @@
-package com.ice.reviewservice.Exception;
+package com.ice.promotionservice.Exception;
 
-import com.ice.reviewservice.DTO.Response.Common.ApiResponse;
+import com.ice.promotionservice.DTO.Response.Common.ApiResponse;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;

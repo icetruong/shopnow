@@ -1,4 +1,10 @@
 package com.ice.reviewservice.Enum;
 
 public enum ErrorCode {
+    PURCHASE_REQUIRED,
+    ALREADY_REVIEWED,
+    REVIEW_NOT_FOUND,
+    EDIT_WINDOW_EXPIRED,
+    REVIEW_ACCESS_DENIED,
+    ORDER_NOT_DELIVERED
 }

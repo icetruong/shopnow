@@ -1,4 +1,4 @@
-package com.ice.reviewservice.Enum;
+package com.ice.promotionservice.Enum;
 
 public enum ErrorCode {
 

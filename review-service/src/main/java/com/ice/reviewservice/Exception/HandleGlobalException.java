@@ -1,6 +1,6 @@
-package com.ice.searchservice.Exception;
+package com.ice.reviewservice.Exception;
 
-import com.ice.searchservice.DTO.Response.Common.ApiResponse;
+import com.ice.reviewservice.DTO.Response.Common.ApiResponse;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;

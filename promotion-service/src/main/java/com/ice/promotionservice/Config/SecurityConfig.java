@@ -1,4 +1,4 @@
-package com.ice.reviewservice.Config;
+package com.ice.promotionservice.Config;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;

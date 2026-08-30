@@ -1,4 +1,4 @@
-package com.ice.reviewservice.Config;
+package com.ice.promotionservice.Config;
 
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
