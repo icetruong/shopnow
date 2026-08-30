@@ -1,4 +1,7 @@
 package com.ice.promotionservice.Enum;
 
-public record CouponDiscountType() {
+public enum CouponDiscountType {
+    PERCENTAGE,
+    FIXED_AMOUNT,
+    FREESHIP
 }

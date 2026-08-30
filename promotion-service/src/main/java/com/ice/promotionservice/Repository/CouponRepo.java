@@ -1,4 +1,9 @@
 package com.ice.promotionservice.Repository;
 
-public interface CouponRepo {
+import com.ice.promotionservice.Entity.Coupon;
+import org.springframework.data.jpa.repository.JpaRepository;
+
+import java.util.UUID;
+
+public interface CouponRepo extends JpaRepository<Coupon, UUID> {
 }
