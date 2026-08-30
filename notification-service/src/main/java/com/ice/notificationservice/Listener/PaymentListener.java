@@ -27,7 +27,7 @@ public class PaymentListener {
         // TODO: mai làm tiếp
     }
 
-    @KafkaListener(topics = "payment.refunded")
+    @KafkaListener(topics = "payment.refunded", groupId = "notification-service")
     public void handleRefunded(String message)
     {
         KafkaEvent<PaymentRefundPayload> kafkaEvent =
