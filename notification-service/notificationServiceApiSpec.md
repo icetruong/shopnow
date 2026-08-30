@@ -261,6 +261,7 @@ Gửi thông báo hàng loạt (marketing, thông báo hệ thống).
 ```json
 {
   "success": true,
+  "message": "Gửi thông báo hàng loạt thành công",
   "data": {
     "broadcastId":   "bc-uuid-1",
     "estimatedReach":15000,

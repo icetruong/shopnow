@@ -1,6 +1,7 @@
 package com.ice.notificationservice.Entity;
 
 import com.ice.notificationservice.Enum.BroadcastStatus;
+import com.ice.notificationservice.Enum.BroadcastTarget;
 import com.ice.notificationservice.Enum.NotificationChannel;
 import jakarta.persistence.*;
 import lombok.*;
@@ -34,8 +35,9 @@ public class NotificationBroadcast {
     private NotificationChannel channel;
 
     /** Tập người nhận: "ALL_USERS" hoặc mã segment. */
-    @Column(name = "target", nullable = false, length = 100)
-    private String target;
+    @Enumerated(EnumType.STRING)
+    @Column(name = "target", nullable = false, length = 20)
+    private BroadcastTarget target;
 
     @Column(name = "title", nullable = false, length = 255)
     private String title;

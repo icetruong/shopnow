@@ -1,23 +1,18 @@
 package com.ice.notificationservice.Service;
 
-import com.ice.notificationservice.DTO.Request.Notification.EmailPreferenceRequest;
-import com.ice.notificationservice.DTO.Request.Notification.NotificationPreferenceRequest;
-import com.ice.notificationservice.DTO.Request.Notification.PushPreferenceRequest;
-import com.ice.notificationservice.DTO.Request.Notification.RegisterDeviceRequest;
-import com.ice.notificationservice.DTO.Request.Notification.SmsPreferenceRequest;
+import com.ice.notificationservice.DTO.Request.Notification.*;
 import com.ice.notificationservice.DTO.Response.Notification.*;
 import com.ice.notificationservice.Entity.DeviceToken;
 import com.ice.notificationservice.Entity.Notification;
+import com.ice.notificationservice.Entity.NotificationBroadcast;
 import com.ice.notificationservice.Entity.NotificationPreference;
-import com.ice.notificationservice.Enum.NotificationChannel;
-import com.ice.notificationservice.Enum.NotificationStatus;
-import com.ice.notificationservice.Enum.NotificationType;
+import com.ice.notificationservice.Enum.*;
 import com.ice.notificationservice.Exception.NotificationNotFoundException;
 import com.ice.notificationservice.Repository.DeviceTokenRepo;
+import com.ice.notificationservice.Repository.NotificationBroadcastRepo;
 import com.ice.notificationservice.Repository.NotificationPreferenceRepo;
 import com.ice.notificationservice.Repository.NotificationRepo;
 import com.ice.notificationservice.Util.NotificationSpecification;
-import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
@@ -46,6 +41,7 @@ public class NotificationService {
     private final NotificationRepo notificationRepo;
     private final DeviceTokenRepo deviceTokenRepo;
     private final NotificationPreferenceRepo notificationPreferenceRepo;
+    private final NotificationBroadcastRepo notificationBroadcastRepo;
 
     public NotificationPageResponse getNotification(int page, int size, Boolean isRead, NotificationType type, String userId) {
 
@@ -246,6 +242,40 @@ public class NotificationService {
                         totalFailed,
                         successRate
                 )
+        );
+    }
+
+    public BroadcastResponse broadcastNotification(BroadcastRequest request, String adminId) {
+        if (request.getTarget() == BroadcastTarget.SEGMENT) {
+            throw new IllegalArgumentException("Target SEGMENT chưa được hỗ trợ");
+        }
+
+        LocalDateTime scheduledAt = request.getScheduleAt() == null
+                ? LocalDateTime.now(ZoneOffset.UTC)
+                : LocalDateTime.ofInstant(request.getScheduleAt(), ZoneOffset.UTC);
+
+        int estimatedReach =  (int) Math.min(
+                deviceTokenRepo.countDistinctActiveUser(), Integer.MAX_VALUE);
+
+        NotificationBroadcast broadcast = NotificationBroadcast.builder()
+                .channel(request.getChannel())
+                .target(request.getTarget())
+                .title(request.getTitle())
+                .body(request.getBody())
+                .imageUrl(request.getImageUrl())
+                .actionUrl(request.getActionUrl())
+                .scheduledAt(scheduledAt)
+                .estimatedReach(estimatedReach)
+                .createdBy(UUID.fromString(adminId))
+                .status(BroadcastStatus.SCHEDULED)
+                .build();
+
+        NotificationBroadcast saved = notificationBroadcastRepo.save(broadcast);
+
+        return new BroadcastResponse(
+                saved.getId().toString(),
+                saved.getEstimatedReach(),
+                saved.getStatus().name()
         );
     }
 

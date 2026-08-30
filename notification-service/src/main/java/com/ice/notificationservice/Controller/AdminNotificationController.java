@@ -1,19 +1,20 @@
 package com.ice.notificationservice.Controller;
 
+import com.ice.notificationservice.DTO.Request.Notification.BroadcastRequest;
 import com.ice.notificationservice.DTO.Response.Common.ApiResponse;
+import com.ice.notificationservice.DTO.Response.Notification.BroadcastResponse;
 import com.ice.notificationservice.DTO.Response.Notification.HistoryNotificationPageResponse;
 import com.ice.notificationservice.Enum.NotificationChannel;
 import com.ice.notificationservice.Enum.NotificationStatus;
 import com.ice.notificationservice.Enum.NotificationType;
 import com.ice.notificationservice.Service.NotificationService;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
 
@@ -38,6 +39,20 @@ public class AdminNotificationController {
                 ApiResponse.success(
                         "Lấy lịch sử gửi thông báo thành công",
                         notificationService.getHistoryNotification(page, size, channel, status, startDate)
+                )
+        );
+    }
+
+    @PostMapping("/broadcast")
+    public ResponseEntity<ApiResponse<BroadcastResponse>> broadcast(@Valid @RequestBody BroadcastRequest request, Authentication authentication)
+    {
+        Jwt jwt = (Jwt) authentication.getPrincipal();
+        String adminId = jwt.getClaimAsString("userId");
+
+        return ResponseEntity.ok(
+                ApiResponse.success(
+                        "Gửi thông báo hàng loạt thành công.",
+                        notificationService.broadcastNotification(request, adminId)
                 )
         );
     }
