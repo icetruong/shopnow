@@ -1,4 +1,4 @@
-package com.ice.productservice.DTO.Event;
+package com.ice.searchservice.DTO.Event.Consume;
 
 import lombok.AllArgsConstructor;
 import lombok.Getter;
