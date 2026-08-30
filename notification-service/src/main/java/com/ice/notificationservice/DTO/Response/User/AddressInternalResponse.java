@@ -1,4 +1,4 @@
-package com.qlda.userservice.DTO.Response.Address;
+package com.ice.notificationservice.DTO.Response.User;
 
 import lombok.AllArgsConstructor;
 import lombok.Getter;
