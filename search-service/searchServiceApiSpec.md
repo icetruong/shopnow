@@ -556,16 +556,18 @@ Mọi event nhận về là JSON của `KafkaEvent<T>` — **deserialize bằng 
 | categoryName | string | |
 | basePrice | long | |
 | salePrice | long | nullable |
-| rating | float | |
+| rating | number | `BigDecimal` |
+| reviewCount | int | |
 | soldCount | int | |
 | colors | string[] | gộp từ toàn bộ variant |
 | sizes | string[] | gộp từ toàn bộ variant |
 | isActive | boolean | |
 | isDeleted | boolean | |
 | thumbnail | string | |
+| createdAt | date | |
 | updatedAt | date | |
 
-> `reviewCount` / `createdAt` chưa nằm trong payload hiện tại của Product Service. Search Service để `reviewCount = 0` và `createdAt = updatedAt` khi thiếu; nếu cần chính xác, Product Service bổ sung 2 field này vào payload sau (không chặn việc đồng bộ).
+> `reviewCount` và `createdAt` đã được Product Service phát kèm trong payload (`KafkaProducerService` gửi `product.getReviewCount()` / `product.getCreatedAt()`). Search Service vẫn giữ fallback: `reviewCount` null → `0`, `createdAt` null → `updatedAt` (xử lý event cũ còn trong topic).
 
 **Flow xử lý:**
 ```
@@ -646,7 +648,7 @@ Bulk reindex (khi ES mất data — POST /internal/search/reindex)
 
 | Hướng | Topic | Payload |
 |---|---|---|
-| Consume | `product.updated` | `KafkaEvent<ProductUpdatedPayload>` (productId, name, slug, description, categoryId, categoryName, basePrice, salePrice, rating, soldCount, colors[], sizes[], isActive, isDeleted, thumbnail, updatedAt) |
+| Consume | `product.updated` | `KafkaEvent<ProductUpdatedPayload>` (productId, name, slug, description, categoryId, categoryName, basePrice, salePrice, rating, reviewCount, soldCount, colors[], sizes[], isActive, isDeleted, thumbnail, createdAt, updatedAt) |
 
 > Search Service **không publish** event nào — nó là consumer thuần túy đối với hệ thống Kafka.
 

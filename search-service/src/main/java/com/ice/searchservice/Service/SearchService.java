@@ -27,7 +27,7 @@ import java.util.Objects;
 
 @Service
 @RequiredArgsConstructor
-public class ProductSearchService {
+public class SearchService {
     private final ElasticsearchOperations elasticsearchOperations;
 
     public PageSearchProductResponse search(String q, Integer page, Integer size, String categoryId, Long minPrice, Long maxPrice,

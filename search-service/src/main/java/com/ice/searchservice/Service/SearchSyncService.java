@@ -8,7 +8,7 @@ import org.springframework.stereotype.Service;
 
 @Service
 @RequiredArgsConstructor
-public class ProductSyncService {
+public class SearchSyncService {
 
     private final ProductSearchRepo productSearchRepo;
 

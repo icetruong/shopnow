@@ -2,7 +2,7 @@ package com.ice.searchservice.Listener;
 
 import com.ice.searchservice.DTO.Event.Consume.KafkaEvent;
 import com.ice.searchservice.DTO.Event.Consume.ProductEventPayload;
-import com.ice.searchservice.Service.ProductSyncService;
+import com.ice.searchservice.Service.SearchSyncService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -21,7 +21,7 @@ public class ProductListener {
 
     private final ObjectMapper objectMapper;
     private final StringRedisTemplate stringRedisTemplate;
-    private final ProductSyncService productSyncService;
+    private final SearchSyncService productSyncService;
 
     @KafkaListener(topics = "product.updated", groupId = "search-service")
     public void handleUpdate(String message)
