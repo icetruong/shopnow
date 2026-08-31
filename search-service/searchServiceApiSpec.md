@@ -199,12 +199,24 @@ Sản phẩm tương tự (dùng ES more_like_this).
 }
 ```
 
-**Flow:**
+**Flow:** (chạy `@Async` sau khi trả 202)
 ```
-1. Gọi Product Service GET /api/v1/products (phân trang, size 500/lần) để lấy toàn bộ sản phẩm
-2. Bulk index vào ES (theo batch 500 sản phẩm/lần)
-3. Cập nhật tiến độ vào Redis reindex:progress:{jobId}
+1. Tạo jobId, ghi Redis reindex:progress:{jobId} = { status: RUNNING, total: 0, processed: 0 }
+2. Loop page = 0, 1, 2...
+   GET {product-service}/api/v1/internal/products?page={page}&size=500
+   Header: X-Internal-Token: {sharedSecret}
+   → response: { content: ProductEventPayload[], totalElements, isLast, ... }
+3. Với mỗi payload trong content:
+   - isDeleted = true  → xoá document {productId} khỏi ES
+   - còn lại           → SearchSyncService.indexProduct(payload)
+   (gom theo batch → ES Bulk API cho nhanh; tái dùng ĐÚNG đường map như Kafka consumer)
+4. Cập nhật reindex:progress:{jobId} = { status, total, processed }
+5. isLast = true → status = DONE
 ```
+
+> **Vì sao gọi `/api/v1/internal/products` chứ không phải `/api/v1/products`:**
+> - `/api/v1/products` là endpoint storefront: đã lọc `isDeleted`, DTO thiếu `description` / `colors` / `sizes` / `categoryName`, `size` bị cap.
+> - `/api/v1/internal/products` (chặn bằng `X-Internal-Token`) trả **đúng shape `ProductEventPayload`** — cùng contract với event `product.updated` → Search Service map bằng chung 1 code path, không lệch logic. Trả cả sản phẩm `isDeleted = true` để Search Service tự xử lý.
 
 ---
 
@@ -638,8 +650,8 @@ product.updated với isActive = false
   → Sản phẩm ẩn không xuất hiện trong search
 
 Bulk reindex (khi ES mất data — POST /internal/search/reindex)
-  → Gọi Product Service GET /api/v1/products (paginate 500/lần)
-  → ES Bulk API index hàng loạt
+  → Gọi Product Service GET /api/v1/internal/products (X-Internal-Token, paginate 500/lần)
+  → Mỗi ProductEventPayload → indexProduct() / xoá nếu isDeleted → ES Bulk API
 ```
 
 ---

@@ -1,12 +1,14 @@
 package com.ice.productservice.Service;
 
 import com.ice.productservice.Client.InventoryClient;
+import com.ice.productservice.DTO.Event.ProductEventPayload;
 import com.ice.productservice.DTO.Request.Internal.ProductRatingInternalRequest;
 import com.ice.productservice.DTO.Request.Product.ProductRequest;
 import com.ice.productservice.DTO.Request.Product.ProductSetIsActiveRequest;
 import com.ice.productservice.DTO.Request.Product.ProductUpdateRequest;
 import com.ice.productservice.DTO.Response.Internal.ProductInternalResponse;
 import com.ice.productservice.DTO.Response.Internal.ProductRatingInternalResponse;
+import com.ice.productservice.DTO.Response.Internal.ProductReindexPageResponse;
 import com.ice.productservice.DTO.Response.Internal.StockBatchResponse;
 import com.ice.productservice.DTO.Response.Internal.StockItemResponse;
 import com.ice.productservice.DTO.Response.Product.*;
@@ -218,6 +220,27 @@ public class ProductService {
         kafkaProducerService.publish(save);
 
         return new ProductRatingInternalResponse(true);
+    }
+
+    // Search Service gọi khi reindex toàn bộ — trả đúng shape ProductEventPayload
+    @Transactional(readOnly = true)
+    public ProductReindexPageResponse getProductsForReindex(int page, int size)
+    {
+        Page<Product> products = productRepo.findAllBy(
+                PageRequest.of(page, size, Sort.by(Sort.Direction.ASC, "createdAt")));
+
+        List<ProductEventPayload> content = products.stream()
+                .map(kafkaProducerService::toEventPayload)
+                .toList();
+
+        return new ProductReindexPageResponse(
+                content,
+                products.getNumber(),
+                products.getSize(),
+                products.getTotalElements(),
+                products.getTotalPages(),
+                products.isLast()
+        );
     }
 
     private ProductDetailResponse toProductDetailResponse(Product product)

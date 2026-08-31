@@ -19,6 +19,10 @@ public interface ProductRepo extends JpaRepository<Product, UUID>, JpaSpecificat
     @EntityGraph(attributePaths = {"productImages", "productVariants", "category"})
     @NonNull
     List<Product> findAll();
+
+    // Reindex: phân trang toàn bộ sản phẩm (kể cả isDeleted = true) cho Search Service
+    @EntityGraph(attributePaths = {"category"})
+    Page<Product> findAllBy(Pageable pageable);
     @EntityGraph(attributePaths = {"productImages", "category"})
     @NonNull
     Page<Product> findAll(Specification<Product> spec, Pageable pageable);

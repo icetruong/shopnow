@@ -24,6 +24,22 @@ public class KafkaProducerService {
 
     public void publish(Product product)
     {
+        ProductEventPayload payload = toEventPayload(product);
+
+        ProductEvent event = new ProductEvent(
+                UUID.randomUUID().toString(),
+                TOPIC,
+                Instant.now().toString(),
+                "1.0",
+                payload
+        );
+
+        kafkaTemplate.send(TOPIC, product.getId().toString(), event);
+    }
+
+    // Dùng chung cho publish Kafka và endpoint reindex GET /internal/products
+    public ProductEventPayload toEventPayload(Product product)
+    {
         String thumbnail = product.getProductImages().stream()
                 .filter(ProductImage::getIsPrimary)
                 .map(ProductImage::getUrl)
@@ -42,7 +58,7 @@ public class KafkaProducerService {
                 .distinct()
                 .toList();
 
-        ProductEventPayload payload = new ProductEventPayload(
+        return new ProductEventPayload(
                 product.getId().toString(),
                 product.getName(),
                 product.getSlug(),
@@ -62,16 +78,6 @@ public class KafkaProducerService {
                 product.getCreatedAt(),
                 product.getUpdatedAt()
         );
-
-        ProductEvent event = new ProductEvent(
-                UUID.randomUUID().toString(),
-                TOPIC,
-                Instant.now().toString(),
-                "1.0",
-                payload
-        );
-
-        kafkaTemplate.send(TOPIC, product.getId().toString(), event);
     }
 
 }

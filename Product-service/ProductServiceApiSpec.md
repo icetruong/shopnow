@@ -694,6 +694,57 @@ Review Service gọi sau khi có review mới để cập nhật điểm trung b
 
 ---
 
+### GET /internal/products
+Search Service gọi khi **reindex toàn bộ** (`POST /internal/search/reindex`). Trả sản phẩm phân trang, mỗi item **đúng shape payload của event `product.updated`** → Search Service map bằng chung một code path với Kafka consumer.
+
+**Header:** `X-Internal-Token: {sharedSecret}`
+
+**Query params**
+| param | default | ghi chú |
+|---|---|---|
+| `page` | 0 | |
+| `size` | 500 | |
+
+**Response 200**
+```json
+{
+  "content": [
+    {
+      "productId":    "prod-uuid-1",
+      "name":         "Áo Polo Nam Basic",
+      "slug":         "ao-polo-nam-basic",
+      "description":  "Áo polo chất liệu cotton cao cấp...",
+      "categoryId":   "cat-uuid-2",
+      "categoryName": "Áo nam",
+      "basePrice":    299000,
+      "salePrice":    249000,
+      "rating":       4.5,
+      "reviewCount":  128,
+      "soldCount":    340,
+      "thumbnail":    "https://storage.shopnow.com/products/ao-polo/thumb.jpg",
+      "isActive":     true,
+      "isDeleted":    false,
+      "colors":       ["Trắng", "Xanh navy"],
+      "sizes":        ["S", "M", "L"],
+      "createdAt":    "2024-01-10T08:00:00Z",
+      "updatedAt":    "2024-01-15T10:00:00Z"
+    }
+  ],
+  "page":          0,
+  "size":          500,
+  "totalElements": 1500,
+  "totalPages":    3,
+  "isLast":        false
+}
+```
+
+**Lưu ý:**
+- Mỗi item = `ProductEventPayload` (dùng lại class phát Kafka) — 1 nguồn sự thật cho mapping ES.
+- Trả **cả sản phẩm `isDeleted = true`** (KHÔNG lọc như `GET /products`) — Search Service tự quyết định xoá document khỏi ES.
+- `size` không bị cap 100 như endpoint public.
+
+---
+
 ## 6. ERROR CODES đặc thù của Product Service
 
 | Code | HTTP | Ý nghĩa |
@@ -732,6 +783,7 @@ Review Service gọi sau khi có review mới để cập nhật điểm trung b
 | PATCH | /admin/products/{id}/images/sort | ✅ | ADMIN |
 | DELETE | /admin/products/{id}/images/{iid} | ✅ | ADMIN |
 | GET | /internal/products/{id} | 🔒 Internal | — |
+| GET | /internal/products | 🔒 Internal | — |
 | GET | /internal/products/{id}/variants/{vid} | 🔒 Internal | — |
 | POST | /internal/products/variants:batch | 🔒 Internal | — |
 | POST | /internal/products/rating | 🔒 Internal | — |
@@ -908,12 +960,14 @@ Publish khi tạo mới, cập nhật, hoặc thay đổi trạng thái sản ph
     "basePrice":    299000,
     "salePrice":    249000,
     "rating":       4.5,
+    "reviewCount":  128,
     "soldCount":    340,
     "thumbnail":    "https://storage.shopnow.com/products/ao-polo/thumb.jpg",
     "isActive":     true,
     "isDeleted":    false,
     "colors":       ["Trắng", "Xanh navy"],
     "sizes":        ["S", "M", "L"],
+    "createdAt":    "2024-01-10T08:00:00Z",
     "updatedAt":    "2024-01-15T10:00:00Z"
   }
 }
@@ -921,6 +975,7 @@ Publish khi tạo mới, cập nhật, hoặc thay đổi trạng thái sản ph
 
 **Kafka key:** `productId`
 **Consumer:** Search Service (re-index Elasticsearch)
+**Payload** = `ProductEventPayload`, cũng là shape trả về của `GET /internal/products` (reindex).
 
 ---
 

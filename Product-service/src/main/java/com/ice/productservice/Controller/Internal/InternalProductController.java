@@ -5,6 +5,7 @@ import com.ice.productservice.DTO.Request.Internal.ProductRatingInternalRequest;
 import com.ice.productservice.DTO.Response.Internal.ProductBatchResponse;
 import com.ice.productservice.DTO.Response.Internal.ProductInternalResponse;
 import com.ice.productservice.DTO.Response.Internal.ProductRatingInternalResponse;
+import com.ice.productservice.DTO.Response.Internal.ProductReindexPageResponse;
 import com.ice.productservice.DTO.Response.Internal.ProductVariantInternalResponse;
 import com.ice.productservice.Service.ProductService;
 import com.ice.productservice.Service.ProductVariantService;
@@ -27,6 +28,15 @@ public class InternalProductController {
     public ResponseEntity<ProductInternalResponse> getProduct(@PathVariable UUID productId)
     {
         return ResponseEntity.ok(productService.getProductForInternal(productId));
+    }
+
+    // Search Service gọi khi reindex — phân trang, item đúng shape event product.updated
+    @GetMapping("/products")
+    public ResponseEntity<ProductReindexPageResponse> getProductsForReindex(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "500") int size)
+    {
+        return ResponseEntity.ok(productService.getProductsForReindex(page, size));
     }
 
     @GetMapping("/products/{productId}/variants/{variantId}")
