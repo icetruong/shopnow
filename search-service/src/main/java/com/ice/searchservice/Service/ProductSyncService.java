@@ -1,66 +1,38 @@
-package com.ice.productservice.Service;
+package com.ice.searchservice.Service;
 
-import com.ice.productservice.Document.ProductDocument;
-import com.ice.productservice.Entity.Product;
-import com.ice.productservice.Entity.ProductImage;
-import com.ice.productservice.Entity.ProductVariant;
-import com.ice.productservice.Repository.ProductRepo;
-import com.ice.productservice.Repository.ProductSearchRepo;
+import com.ice.searchservice.DTO.Event.Consume.ProductEventPayload;
+import com.ice.searchservice.Document.ProductDocument;
+import com.ice.searchservice.Repository.ProductSearchRepo;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
-import java.util.List;
-import java.util.Objects;
-
-// TODO: Tách toàn bộ class này sang Search Service
-// Search Service sẽ tự sync vào Elasticsearch sau khi consume Kafka event "product.updated"
-// Product Service không nên phụ thuộc vào Elasticsearch
 @Service
 @RequiredArgsConstructor
 public class ProductSyncService {
 
     private final ProductSearchRepo productSearchRepo;
-    private final ProductRepo productRepo;
 
-    public void indexProduct(Product product)
+    public void indexProduct(ProductEventPayload payload)
     {
-        String thumbnail = product.getProductImages().stream()
-                .filter(ProductImage::getIsPrimary)
-                .map(ProductImage::getUrl)
-                .findFirst()
-                .orElse(null);
-
-        List<String> colors = product.getProductVariants().stream()
-                .map(ProductVariant::getColor)
-                .filter(Objects::nonNull)
-                .distinct()
-                .toList();
-
-        List<String> sizes = product.getProductVariants().stream()
-                .map(ProductVariant::getSize)
-                .filter(Objects::nonNull)
-                .distinct()
-                .toList();
-
         ProductDocument doc = ProductDocument.builder()
-                .productId(product.getId().toString())
-                .name(product.getName())
-                .nameSuggest(product.getName())
-                .description(product.getDescription())
-                .slug(product.getSlug())
-                .thumbnail(thumbnail)
-                .basePrice(product.getBasePrice())
-                .salePrice(product.getSalePrice())
-                .rating(product.getRating())
-                .soldCount(product.getSoldCount())
-                .categoryId(product.getCategory().getId().toString())
-                .categoryName(product.getCategory().getName())
-                .colors(colors)
-                .sizes(sizes)
-                .isActive(product.getIsActive())
-                .isDeleted(product.getIsDeleted())
-                .createdAt(product.getCreatedAt())
+                .productId(payload.getProductId())
+                .name(payload.getName())
+                .description(payload.getDescription())
+                .slug(payload.getSlug())
+                .thumbnail(payload.getThumbnail())
+                .basePrice(payload.getBasePrice())
+                .salePrice(payload.getSalePrice())
+                .rating(payload.getRating())
+                .reviewCount(payload.getReviewCount())
+                .soldCount(payload.getSoldCount())
+                .categoryId(payload.getCategoryId())
+                .categoryName(payload.getCategoryName())
+                .colors(payload.getColors())
+                .sizes(payload.getSizes())
+                .isActive(payload.getIsActive())
+                .isDeleted(payload.getIsDeleted())
+                .createdAt(payload.getCreatedAt())
+                .updatedAt(payload.getUpdatedAt())
                 .build();
 
         productSearchRepo.save(doc);
@@ -71,10 +43,8 @@ public class ProductSyncService {
         productSearchRepo.deleteById(productId);
     }
 
-    @Transactional(readOnly = true)
-    public void syncAll()
-    {
-        List<Product> products = productRepo.findAll();
-        products.forEach(this::indexProduct);
+    // TODO: reindex — gọi Product Service REST (GET /api/v1/products, paginate) rồi bulk index
+    public void syncAll() {
+
     }
 }

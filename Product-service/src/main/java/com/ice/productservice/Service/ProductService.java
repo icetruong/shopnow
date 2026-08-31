@@ -42,7 +42,6 @@ public class ProductService {
     private final CategoryRepo categoryRepo;
     private final ProductAttributeService productAttributeService;
     private final ProductVariantService productVariantService;
-    private final ProductSyncService productSyncService;
     private final RedisTemplate<String, Object> redisTemplate;
     private final KafkaProducerService kafkaProducerService;
     private final InventoryClient inventoryClient;
@@ -125,7 +124,6 @@ public class ProductService {
         Product save = productRepo.save(product);
         productAttributeService.createProductAttribute(productRequest.getAttributes(), save);
         productVariantService.createProductVariant(productRequest.getVariants(), save);
-        productSyncService.indexProduct(save);
         kafkaProducerService.publish(save);
 
         invalidateListCache();
@@ -159,7 +157,6 @@ public class ProductService {
         Product save = productRepo.save(product);
         productAttributeService.deleteAllProductAttributeByProduct(save);
         productAttributeService.createProductAttribute(productRequest.getAttributes(), save);
-        productSyncService.indexProduct(save);
         kafkaProducerService.publish(save);
 
         invalidateListCache();
@@ -174,7 +171,6 @@ public class ProductService {
 
         product.setIsActive(request.getIsActive());
         productRepo.save(product);
-        productSyncService.indexProduct(product);
         kafkaProducerService.publish(product);
 
         invalidateListCache();
@@ -190,7 +186,6 @@ public class ProductService {
 
         product.setIsDeleted(true);
         Product save = productRepo.save(product);
-        productSyncService.deleteProduct(product.getId().toString());
         kafkaProducerService.publish(save);
 
         invalidateListCache();
@@ -220,7 +215,6 @@ public class ProductService {
         product.setRating(request.getAvgRating());
         product.setReviewCount(request.getTotalReviews().intValue());
         Product save = productRepo.save(product);
-        productSyncService.indexProduct(product);
         kafkaProducerService.publish(save);
 
         return new ProductRatingInternalResponse(true);

@@ -23,12 +23,14 @@ public class ProductEventPayload {
     private Long basePrice;
     private Long salePrice;
     private BigDecimal rating;
+    private Integer reviewCount;
     private Integer soldCount;
     private String thumbnail;
     private Boolean isActive;
     private Boolean isDeleted;
     private List<String> colors;
     private List<String> sizes;
+    private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 
 }

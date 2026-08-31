@@ -52,12 +52,14 @@ public class KafkaProducerService {
                 product.getBasePrice(),
                 product.getSalePrice(),
                 product.getRating(),
+                product.getReviewCount(),
                 product.getSoldCount(),
                 thumbnail,
                 product.getIsActive(),
                 product.getIsDeleted(),
                 colors,
                 sizes,
+                product.getCreatedAt(),
                 product.getUpdatedAt()
         );
 

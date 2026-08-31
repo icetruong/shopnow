@@ -1,4 +1,4 @@
-package com.ice.productservice.DTO.Response.Search;
+package com.ice.searchservice.DTO.Response.Search;
 
 import lombok.AllArgsConstructor;
 import lombok.Getter;

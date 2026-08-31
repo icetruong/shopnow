@@ -1,4 +1,4 @@
-package com.ice.productservice.Service;
+package com.ice.searchservice.Service;
 
 import co.elastic.clients.elasticsearch._types.SortOptions;
 import co.elastic.clients.elasticsearch._types.SortOrder;
@@ -6,8 +6,8 @@ import co.elastic.clients.elasticsearch._types.aggregations.Aggregation;
 import co.elastic.clients.elasticsearch._types.aggregations.AggregationRange;
 import co.elastic.clients.elasticsearch._types.query_dsl.Query;
 import co.elastic.clients.elasticsearch._types.query_dsl.TextQueryType;
-import com.ice.productservice.DTO.Response.Search.*;
-import com.ice.productservice.Document.ProductDocument;
+import com.ice.searchservice.DTO.Response.Search.*;
+import com.ice.searchservice.Document.ProductDocument;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.elasticsearch.client.elc.ElasticsearchAggregations;
@@ -25,9 +25,6 @@ import org.springframework.stereotype.Service;
 import java.util.List;
 import java.util.Objects;
 
-// TODO: Tách toàn bộ class này sang Search Service
-// Search Service sẽ consume Kafka event "product.updated" và tự index vào Elasticsearch
-// Product Service không nên ghi thẳng vào Elasticsearch
 @Service
 @RequiredArgsConstructor
 public class ProductSearchService {
@@ -185,7 +182,7 @@ public class ProductSearchService {
                         b -> {
                             b.
                                     must(m -> m.multiMatch(builder -> builder
-                                            .fields("nameSuggest", "nameSuggest._2gram", "nameSuggest._3gram")
+                                            .fields("name.suggest", "name.suggest._2gram", "name.suggest._3gram")
                                             .query(q)
                                             .type(TextQueryType.BoolPrefix)
                                     ));
