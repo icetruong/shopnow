@@ -229,6 +229,7 @@ Xem tiến độ reindex.
 ```json
 {
   "success": true,
+  "message": "retrieved successfully",
   "data": {
     "jobId":     "reindex-job-uuid",
     "status":    "RUNNING",

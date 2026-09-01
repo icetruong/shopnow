@@ -6,10 +6,14 @@ import co.elastic.clients.elasticsearch._types.aggregations.Aggregation;
 import co.elastic.clients.elasticsearch._types.aggregations.AggregationRange;
 import co.elastic.clients.elasticsearch._types.query_dsl.Query;
 import co.elastic.clients.elasticsearch._types.query_dsl.TextQueryType;
+import com.ice.searchservice.DTO.Redis.JobReindexRedis;
 import com.ice.searchservice.DTO.Response.Search.*;
 import com.ice.searchservice.Document.ProductDocument;
+import com.ice.searchservice.Enum.JobReindexStatus;
+import com.ice.searchservice.Repository.ProductSearchRepo;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.elasticsearch.ResourceNotFoundException;
 import org.springframework.data.elasticsearch.client.elc.ElasticsearchAggregations;
 import org.springframework.data.elasticsearch.client.elc.NativeQuery;
 import org.springframework.data.elasticsearch.core.ElasticsearchOperations;
@@ -20,15 +24,22 @@ import org.springframework.data.elasticsearch.core.query.highlight.Highlight;
 import org.springframework.data.elasticsearch.core.query.highlight.HighlightField;
 import org.springframework.data.elasticsearch.core.query.highlight.HighlightFieldParameters;
 import org.springframework.data.elasticsearch.core.query.highlight.HighlightParameters;
+import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 
+import java.time.Duration;
 import java.util.List;
 import java.util.Objects;
+import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
 public class SearchService {
+    private static final String REINDEX_PROCESS = "reindex:progress:";
+
     private final ElasticsearchOperations elasticsearchOperations;
+    private final RedisTemplate<String, Object> redisTemplate;
+    private final SearchSyncService searchSyncService;
 
     public PageSearchProductResponse search(String q, Integer page, Integer size, String categoryId, Long minPrice, Long maxPrice,
                                             String color, String sizeFilter, String sort)
@@ -206,6 +217,36 @@ public class SearchService {
                 .map(hit -> hit.getContent().getName())
                 .toList();
 
+    }
+
+    public JobReindexResponse startReindex()
+    {
+        String jobId = UUID.randomUUID().toString();
+
+        redisTemplate.opsForValue().set(REINDEX_PROCESS+jobId, new JobReindexRedis(
+                JobReindexStatus.RUNNING, 0L, 0L), Duration.ofHours(24));
+
+        searchSyncService.syncAll(jobId);
+
+        return new JobReindexResponse(jobId);
+    }
+
+
+    public JobReindexStatusResponse getReindex(String jobId)
+    {
+        JobReindexRedis jobReindexRedis =(JobReindexRedis) redisTemplate.opsForValue().get(REINDEX_PROCESS+jobId);
+        if (jobReindexRedis == null)
+            throw new ResourceNotFoundException("không tìm thấy jobReindexRedis trong reids" + jobId);
+        Long total = jobReindexRedis.getTotal();
+        Long processed = jobReindexRedis.getProcessed();
+        long progress = (total == null || total == 0) ? 0 : processed * 100 / total;
+        return new JobReindexStatusResponse(
+                jobId,
+                jobReindexRedis.getStatus().toString(),
+                total,
+                processed,
+                progress
+        );
     }
 
     private AggregationsResponse toAggregationsResponse(ElasticsearchAggregations aggregations)

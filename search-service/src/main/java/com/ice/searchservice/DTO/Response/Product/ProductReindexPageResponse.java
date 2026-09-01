@@ -1,6 +1,6 @@
-package com.ice.productservice.DTO.Response.Internal;
+package com.ice.searchservice.DTO.Response.Product;
 
-import com.ice.productservice.DTO.Event.ProductEventPayload;
+import com.ice.searchservice.DTO.Event.Consume.ProductEventPayload;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
