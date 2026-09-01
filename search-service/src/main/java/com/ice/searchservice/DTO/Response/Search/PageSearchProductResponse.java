@@ -18,5 +18,6 @@ public class PageSearchProductResponse {
     private Long totalElements;
     private Integer totalPages;
     private Boolean isLast;
+    private Long took;
     private AggregationsResponse aggregations;
 }

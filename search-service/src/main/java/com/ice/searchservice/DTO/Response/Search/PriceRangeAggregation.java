@@ -10,6 +10,7 @@ import lombok.Setter;
 @AllArgsConstructor
 @NoArgsConstructor
 public class PriceRangeAggregation {
+    private String label;
     private Long from;
     private Long to;
     private Long count;

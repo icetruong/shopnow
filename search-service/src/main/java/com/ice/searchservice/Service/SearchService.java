@@ -1,19 +1,28 @@
 package com.ice.searchservice.Service;
 
+import co.elastic.clients.elasticsearch._types.FieldValue;
 import co.elastic.clients.elasticsearch._types.SortOptions;
 import co.elastic.clients.elasticsearch._types.SortOrder;
 import co.elastic.clients.elasticsearch._types.aggregations.Aggregation;
 import co.elastic.clients.elasticsearch._types.aggregations.AggregationRange;
+import co.elastic.clients.elasticsearch._types.aggregations.StringTermsBucket;
+import co.elastic.clients.elasticsearch._types.query_dsl.Operator;
 import co.elastic.clients.elasticsearch._types.query_dsl.Query;
 import co.elastic.clients.elasticsearch._types.query_dsl.TextQueryType;
 import com.ice.searchservice.DTO.Redis.JobReindexRedis;
 import com.ice.searchservice.DTO.Response.Search.*;
 import com.ice.searchservice.Document.ProductDocument;
 import com.ice.searchservice.Enum.JobReindexStatus;
+import com.ice.searchservice.Enum.SortOption;
+import com.ice.searchservice.Exception.ElasticsearchUnavailableException;
+import com.ice.searchservice.Exception.InvalidSortOptionException;
+import com.ice.searchservice.Exception.ResourceNotFoundException;
+import com.ice.searchservice.Exception.SearchQueryTooLongException;
 import com.ice.searchservice.Repository.ProductSearchRepo;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataAccessException;
 import org.springframework.data.domain.PageRequest;
-import org.springframework.data.elasticsearch.ResourceNotFoundException;
 import org.springframework.data.elasticsearch.client.elc.ElasticsearchAggregations;
 import org.springframework.data.elasticsearch.client.elc.NativeQuery;
 import org.springframework.data.elasticsearch.core.ElasticsearchOperations;
@@ -32,18 +41,34 @@ import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class SearchService {
     private static final String REINDEX_PROCESS = "reindex:progress:";
+    private static final long PRICE_TIER_1 = 200_000L;
+    private static final long PRICE_TIER_2 = 500_000L;
+    private static final String PRICE_FIELD = "basePrice";
 
     private final ElasticsearchOperations elasticsearchOperations;
     private final RedisTemplate<String, Object> redisTemplate;
     private final SearchSyncService searchSyncService;
 
     public PageSearchProductResponse search(String q, Integer page, Integer size, String categoryId, Long minPrice, Long maxPrice,
-                                            String color, String sizeFilter, String sort)
+                                            List<String> colors, List<String> sizes, Double minRating, String sort)
     {
+        if (q != null && q.length() > 200)
+            throw new SearchQueryTooLongException(q);     // → 400 SEARCH_QUERY_TOO_LONG
+
+        // sort không hợp lệ
+        if (!SortOption.isValid(sort))
+            throw new InvalidSortOptionException(sort);  // → 400 INVALID_SORT_OPTION
+
+        // chuẩn hoá phân trang (bảo vệ ES)
+        int safePage = Math.max(0, page);
+        int safeSize = Math.min(Math.max(size, 1), 100);
+
+
         // build Query
         Query boolQuery = Query.of(root -> root.bool(b -> {
             if (q != null && !q.isBlank()) {
@@ -51,6 +76,8 @@ public class SearchService {
                         .fields("name^3", "description")
                         .query(q)
                         .type(TextQueryType.BestFields)
+                        .fuzziness("AUTO")
+                        .operator(Operator.And)
                 ));
             } else {
                 b.must(m -> m.matchAll(builder -> builder));
@@ -65,7 +92,7 @@ public class SearchService {
             if (minPrice != null || maxPrice != null) {
                 b.filter(f -> f.range(r -> {
                     r.number(n -> {
-                        n.field("basePrice");
+                        n.field(PRICE_FIELD);
                         if (minPrice != null) n.gte((double) minPrice);
                         if (maxPrice != null) n.lte((double) maxPrice);
                         return n;
@@ -74,25 +101,22 @@ public class SearchService {
                 }));
             }
 
-            if (color != null)
-                b.filter(f -> f.term(t -> t.field("colors").value(color)));
+            if (minRating != null)
+                b.filter(f -> f.range(r -> r.number(n -> n.field("rating").gte(minRating))));
 
-            if (sizeFilter != null)
-                b.filter(f -> f.term(t -> t.field("sizes").value(sizeFilter)));
+            if (colors != null && !colors.isEmpty())
+                b.filter(f -> f.terms(t -> t.field("colors")
+                        .terms(tv -> tv.value(colors.stream().map(FieldValue::of).toList()))));
+
+            if (sizes != null && !sizes.isEmpty())
+                b.filter(f -> f.terms(t -> t.field("sizes")
+                        .terms(tv -> tv.value(sizes.stream().map(FieldValue::of).toList()))));
 
             return b;
         }));
 
-        // build Sort
-        SortOptions sortOptions = switch (sort == null ? "relevence" : sort)
-        {
-            case "price_asc" -> SortOptions.of(s -> s.field(f -> f.field("basePrice").order(SortOrder.Asc) ));
-            case "price_desc" -> SortOptions.of(s -> s.field(f -> f.field("basePrice").order(SortOrder.Desc)));
-            case "newest" -> SortOptions.of(s -> s.field(f -> f.field("createdAt").order(SortOrder.Desc)));
-            case "bestseller" -> SortOptions.of(s -> s.field(f -> f.field("soldCount").order(SortOrder.Desc)));
-            case "rating" -> SortOptions.of(s -> s.field(f -> f.field("rating").order(SortOrder.Desc)));
-            default -> SortOptions.of(s-> s.score(sc -> sc.order(SortOrder.Desc)));
-        };
+        // build Sort — primary + tiebreaker để phân trang from/size ổn định
+        List<SortOptions> sortOptions = buildSort(SortOption.from(sort));
 
         // build hightligh
         Highlight highlight = new Highlight(
@@ -120,18 +144,12 @@ public class SearchService {
                 .withQuery(boolQuery)
                 .withSort(sortOptions)
                 .withAggregation(
-                        "categories",
-                        Aggregation.of(a -> a
-                                .terms(t -> t.field("categoryId").size(20))
-                        )
-                )
-                .withAggregation(
                         "price_ranges",
                         Aggregation.of( a -> a
-                                .range(r -> r.field("basePrice").ranges(
-                                        AggregationRange.of(ar -> ar.to(200000.0)),
-                                        AggregationRange.of(ar -> ar.from(200000.0).to(500000.0)),
-                                        AggregationRange.of(ar -> ar.from(500000.0))
+                                .range(r -> r.field(PRICE_FIELD).ranges(
+                                        AggregationRange.of(ar -> ar.to((double) PRICE_TIER_1)),
+                                        AggregationRange.of(ar -> ar.from((double) PRICE_TIER_1).to((double) PRICE_TIER_2)),
+                                        AggregationRange.of(ar -> ar.from((double) PRICE_TIER_2))
                                 ))
 
                         )
@@ -148,37 +166,68 @@ public class SearchService {
                                 .terms(t -> t.field("colors").size(50))
                         )
                 )
+                .withAggregation("ratings", Aggregation.of(a -> a.range(r -> r
+                        .field("rating")
+                        .ranges(
+                                AggregationRange.of(x -> x.key("5").from(5.0)),
+                                AggregationRange.of(x -> x.key("4").from(4.0)),
+                                AggregationRange.of(x -> x.key("3").from(3.0)),
+                                AggregationRange.of(x -> x.key("2").from(2.0)),
+                                AggregationRange.of(x -> x.key("1").from(1.0))
+                        ))))
+                .withAggregation("categories",
+                        Aggregation.of(a -> a
+                                .terms(t -> t.field("categoryId").size(20))
+                                .aggregations("catName", sub -> sub.terms(tt -> tt.field("categoryName").size(1)))
+
+                ))
                 .withHighlightQuery(new HighlightQuery(highlight, ProductDocument.class))
-                .withPageable(PageRequest.of(page, size))
+                .withPageable(PageRequest.of(safePage, safeSize))
                 .build();
 
-        SearchHits<ProductDocument> hits = elasticsearchOperations.search(nativeQuery, ProductDocument.class);
+        SearchHits<ProductDocument> hits;
+        long t0 = System.currentTimeMillis();
+        try {
+            hits = elasticsearchOperations.search(nativeQuery, ProductDocument.class);
+        } catch (DataAccessException | co.elastic.clients.elasticsearch._types.ElasticsearchException e) {
+            log.error("Elasticsearch lỗi khi search: q={}", q, e);
+            throw new ElasticsearchUnavailableException("Elasticsearch không phản hồi");   // → 503 ELASTICSEARCH_UNAVAILABLE
+        }
+        long took = System.currentTimeMillis() - t0;
 
         List<SearchProductResponse> content = hits.getSearchHits().stream()
-                .map(searchHit -> new SearchProductResponse(
-                        searchHit.getContent().getProductId(),
-                        searchHit.getContent().getName(),
-                        searchHit.getContent().getSlug(),
-                        searchHit.getContent().getThumbnail(),
-                        searchHit.getContent().getBasePrice(),
-                        searchHit.getContent().getSalePrice(),
-                        searchHit.getContent().getRating(),
-                        searchHit.getContent().getSoldCount(),
-                        searchHit.getHighlightFields()
-                )).toList();
+                .map(searchHit -> {
+                    ProductDocument doc = searchHit.getContent();
+                    return new SearchProductResponse(
+                            doc.getProductId(),
+                            doc.getName(),
+                            doc.getSlug(),
+                            doc.getThumbnail(),
+                            doc.getBasePrice(),
+                            doc.getSalePrice(),
+                            computeDiscountPct(doc.getBasePrice(), doc.getSalePrice()),
+                            doc.getRating(),
+                            doc.getReviewCount(),
+                            doc.getSoldCount(),
+                            doc.getCategoryName(),
+                            searchHit.getHighlightFields()
+                    );
+                }).toList();
 
 
         AggregationsResponse aggregationsResponse = toAggregationsResponse((ElasticsearchAggregations) hits.getAggregations());
 
         long totalElements = hits.getTotalHits();
-        int totalPages = (int) Math.ceil((double) totalElements / size);
+        int totalPages = (int) Math.ceil((double) totalElements / safeSize);
 
         return new PageSearchProductResponse(
                 content,
-                page,
-                size,totalElements,
+                safePage,
+                safeSize,
+                totalElements,
                 totalPages,
-                page >= totalPages - 1,
+                safePage >= totalPages - 1,
+                took,
                 aggregationsResponse
         );
     }
@@ -249,6 +298,26 @@ public class SearchService {
         );
     }
 
+    private List<SortOptions> buildSort(SortOption sort) {
+        SortOptions tieBreak = SortOptions.of(s -> s.field(f -> f.field("productId").order(SortOrder.Asc)));
+
+        SortOptions primary = switch (sort) {
+            case PRICE_ASC  -> SortOptions.of(s -> s.field(f -> f.field(PRICE_FIELD).order(SortOrder.Asc)));
+            case PRICE_DESC -> SortOptions.of(s -> s.field(f -> f.field(PRICE_FIELD).order(SortOrder.Desc)));
+            case NEWEST     -> SortOptions.of(s -> s.field(f -> f.field("createdAt").order(SortOrder.Desc)));
+            case BESTSELLER -> SortOptions.of(s -> s.field(f -> f.field("soldCount").order(SortOrder.Desc)));
+            case RATING     -> SortOptions.of(s -> s.field(f -> f.field("rating").order(SortOrder.Desc)));
+            case RELEVANCE  -> SortOptions.of(s -> s.score(sc -> sc.order(SortOrder.Desc)));
+        };
+
+        // rating cần tiebreaker theo reviewCount (spec), các case khác chỉ cần productId
+        if (sort == SortOption.RATING) {
+            SortOptions byReview = SortOptions.of(s -> s.field(f -> f.field("reviewCount").order(SortOrder.Desc)));
+            return List.of(primary, byReview, tieBreak);
+        }
+        return List.of(primary, tieBreak);
+    }
+
     private AggregationsResponse toAggregationsResponse(ElasticsearchAggregations aggregations)
     {
         if (aggregations == null)
@@ -256,37 +325,69 @@ public class SearchService {
 
         List<CategoryAggregation> categoryAggregations = Objects.requireNonNull(aggregations.get("categories"))
                 .aggregation().getAggregate().sterms().buckets().array().stream()
-                .map(b -> new CategoryAggregation(
-                        b.key().stringValue(),
-                        b.key().stringValue(),
-                        b.docCount()
-                ))
+                .map(b -> {
+                    String id = b.key().stringValue();
+                    return new CategoryAggregation(id, resolveCategoryName(b, id), b.docCount());
+                })
                 .toList();
 
         List<PriceRangeAggregation> priceRangeAggregations = Objects.requireNonNull(aggregations.get("price_ranges"))
                 .aggregation().getAggregate().range().buckets().array().stream()
-                .map(b -> new PriceRangeAggregation(
-                        b.from() != null && b.from() > 0 ? (long) b.from().doubleValue() : null,
-                        b.to() != null && b.to() < Double.MAX_VALUE ? (long) b.to().doubleValue() : null,
-                        b.docCount()
-                )).toList();
+                .map(b -> {
+                    Long from = b.from() != null && b.from() > 0 ? (long) b.from().doubleValue() : null;
+                    Long to = b.to() != null && b.to() < Double.MAX_VALUE ? (long) b.to().doubleValue() : null;
+                    return new PriceRangeAggregation(priceLabel(from, to), from, to, b.docCount());
+                }).toList();
 
         List<ColorAggregation> colorAggregations = Objects.requireNonNull(aggregations.get("colors"))
                 .aggregation().getAggregate().sterms().buckets().array().stream()
-                .map(b -> new ColorAggregation(
-                        b.key().stringValue(),
-                        b.docCount()
-                )).toList();
+                .map(b -> new ColorAggregation(b.key().stringValue(), b.docCount()))
+                .toList();
 
         List<String> sizes = Objects.requireNonNull(aggregations.get("sizes"))
                 .aggregation().getAggregate().sterms().buckets().array().stream()
                 .map(b -> b.key().stringValue()).toList();
 
+        List<RatingAggregation> ratingAggregations = Objects.requireNonNull(aggregations.get("ratings"))
+                .aggregation().getAggregate().range().buckets().array().stream()
+                .filter(b -> b.key() != null && b.docCount() > 0)
+                .map(b -> new RatingAggregation(Integer.valueOf(b.key()), b.docCount()))
+                .toList();
+
         return new AggregationsResponse(
                 categoryAggregations,
                 priceRangeAggregations,
                 colorAggregations,
-                sizes
+                sizes,
+                ratingAggregations
         );
+    }
+
+    // lấy categoryName từ sub-aggregation "catName" (terms size 1), fallback về id nếu thiếu
+    private static String resolveCategoryName(StringTermsBucket bucket, String fallback) {
+        var catName = bucket.aggregations().get("catName");
+        if (catName == null)
+            return fallback;
+        return catName.sterms().buckets().array().stream()
+                .findFirst()
+                .map(x -> x.key().stringValue())
+                .orElse(fallback);
+    }
+
+    // % giảm giá làm tròn; 0 nếu không có salePrice hợp lệ
+    private static Integer computeDiscountPct(Long basePrice, Long salePrice) {
+        if (basePrice == null || basePrice <= 0 || salePrice == null || salePrice >= basePrice)
+            return 0;
+        return (int) Math.round((basePrice - salePrice) * 100.0 / basePrice);
+    }
+
+    private static String priceLabel(Long from, Long to) {
+        if (from == null) return "Dưới " + toK(to);
+        if (to == null) return "Trên " + toK(from);
+        return toK(from) + " - " + toK(to);
+    }
+
+    private static String toK(Long value) {
+        return (value / 1000) + "k";
     }
 }

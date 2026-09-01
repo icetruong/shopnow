@@ -16,4 +16,5 @@ public class AggregationsResponse {
     private List<PriceRangeAggregation> priceRanges;
     private List<ColorAggregation> colors;
     private List<String> sizes;
+    private List<RatingAggregation> ratings;
 }

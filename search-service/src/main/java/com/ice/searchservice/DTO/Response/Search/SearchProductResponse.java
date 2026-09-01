@@ -20,7 +20,10 @@ public class SearchProductResponse {
     private String thumbnail;
     private Long basePrice;
     private Long salePrice;
+    private Integer discountPct;
     private BigDecimal rating;
+    private Integer reviewCount;
     private Integer soldCount;
+    private String  categoryName;
     private Map<String, List<String>> highlight;
 }

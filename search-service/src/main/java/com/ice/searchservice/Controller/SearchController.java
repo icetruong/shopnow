@@ -28,14 +28,15 @@ public class SearchController {
             @RequestParam(required = false) String categoryId,
             @RequestParam(required = false) Long minPrice,
             @RequestParam(required = false) Long maxPrice,
-            @RequestParam(required = false) String color,
-            @RequestParam(required = false) String sizeFilter,
+            @RequestParam(required = false) List<String> color,
+            @RequestParam(required = false) List<String> sizes,
+            @RequestParam(required = false) Double minRating,
             @RequestParam(defaultValue = "relevance") String sort
     ) {
         return ResponseEntity.ok(
                 ApiResponse.success(
                         "retrieved successfully",
-                        searchService.search(q, page, size, categoryId, minPrice, maxPrice, color, sizeFilter, sort)
+                        searchService.search(q, page, size, categoryId, minPrice, maxPrice, color, sizes, minRating, sort)
                 )
         );
     }

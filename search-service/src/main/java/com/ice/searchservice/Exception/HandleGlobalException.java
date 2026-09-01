@@ -24,6 +24,24 @@ public class HandleGlobalException {
                 .body(ApiResponse.fail(ex.getMessage(), "NOT_FOUND"));
     }
 
+    @ExceptionHandler(SearchQueryTooLongException.class)
+    public ResponseEntity<ApiResponse<Void>> handleQueryTooLong(SearchQueryTooLongException ex) {
+        return ResponseEntity.badRequest()
+                .body(ApiResponse.fail("Query quá dài (tối đa 200 ký tự).", "SEARCH_QUERY_TOO_LONG"));
+    }
+
+    @ExceptionHandler(InvalidSortOptionException.class)
+    public ResponseEntity<ApiResponse<Void>> handleInvalidSort(InvalidSortOptionException ex) {
+        return ResponseEntity.badRequest()
+                .body(ApiResponse.fail("Sort option không hợp lệ.", "INVALID_SORT_OPTION"));
+    }
+
+    @ExceptionHandler(ElasticsearchUnavailableException.class)
+    public ResponseEntity<ApiResponse<Void>> handleElasticsearchDown(ElasticsearchUnavailableException ex) {
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .body(ApiResponse.fail("Elasticsearch — datastore của service — đang không khả dụng.", "ELASTICSEARCH_UNAVAILABLE"));
+    }
+
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ApiResponse<Void>> handleValidation(MethodArgumentNotValidException ex) {
 
