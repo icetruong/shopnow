@@ -1,0 +1,4 @@
+package com.ice.searchservice.Config;
+
+public class RedisConfig {
+}
