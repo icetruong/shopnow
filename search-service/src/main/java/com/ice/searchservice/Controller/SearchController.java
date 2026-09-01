@@ -2,6 +2,7 @@ package com.ice.searchservice.Controller;
 
 import com.ice.searchservice.DTO.Response.Common.ApiResponse;
 import com.ice.searchservice.DTO.Response.Search.PageSearchProductResponse;
+import com.ice.searchservice.DTO.Response.Search.SuggestResponse;
 import com.ice.searchservice.Service.SearchService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -28,7 +29,7 @@ public class SearchController {
             @RequestParam(required = false) String categoryId,
             @RequestParam(required = false) Long minPrice,
             @RequestParam(required = false) Long maxPrice,
-            @RequestParam(required = false) List<String> color,
+            @RequestParam(required = false) List<String> colors,
             @RequestParam(required = false) List<String> sizes,
             @RequestParam(required = false) Double minRating,
             @RequestParam(defaultValue = "relevance") String sort
@@ -36,14 +37,14 @@ public class SearchController {
         return ResponseEntity.ok(
                 ApiResponse.success(
                         "retrieved successfully",
-                        searchService.search(q, page, size, categoryId, minPrice, maxPrice, color, sizes, minRating, sort)
+                        searchService.search(q, page, size, categoryId, minPrice, maxPrice, colors, sizes, minRating, sort)
                 )
         );
     }
 
     // GET /api/v1/search/suggest — autocomplete khi user đang gõ
     @GetMapping("/suggest")
-    public ResponseEntity<ApiResponse<List<String>>> suggest(
+    public ResponseEntity<ApiResponse<SuggestResponse>> suggest(
             @RequestParam String q,
             @RequestParam(defaultValue = "8") Integer size
     ) {

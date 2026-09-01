@@ -18,7 +18,6 @@ import com.ice.searchservice.Exception.ElasticsearchUnavailableException;
 import com.ice.searchservice.Exception.InvalidSortOptionException;
 import com.ice.searchservice.Exception.ResourceNotFoundException;
 import com.ice.searchservice.Exception.SearchQueryTooLongException;
-import com.ice.searchservice.Repository.ProductSearchRepo;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataAccessException;
@@ -26,6 +25,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.elasticsearch.client.elc.ElasticsearchAggregations;
 import org.springframework.data.elasticsearch.client.elc.NativeQuery;
 import org.springframework.data.elasticsearch.core.ElasticsearchOperations;
+import org.springframework.data.elasticsearch.core.SearchHit;
 import org.springframework.data.elasticsearch.core.SearchHits;
 import org.springframework.data.elasticsearch.core.query.FetchSourceFilter;
 import org.springframework.data.elasticsearch.core.query.HighlightQuery;
@@ -49,6 +49,8 @@ public class SearchService {
     private static final long PRICE_TIER_1 = 200_000L;
     private static final long PRICE_TIER_2 = 500_000L;
     private static final String PRICE_FIELD = "basePrice";
+    private static final int MAX_QUERY_LENGTH = 200;
+    private static final int MAX_SUGGESTIONS = 8;
 
     private final ElasticsearchOperations elasticsearchOperations;
     private final RedisTemplate<String, Object> redisTemplate;
@@ -57,7 +59,7 @@ public class SearchService {
     public PageSearchProductResponse search(String q, Integer page, Integer size, String categoryId, Long minPrice, Long maxPrice,
                                             List<String> colors, List<String> sizes, Double minRating, String sort)
     {
-        if (q != null && q.length() > 200)
+        if (q != null && q.length() > MAX_QUERY_LENGTH)
             throw new SearchQueryTooLongException(q);     // → 400 SEARCH_QUERY_TOO_LONG
 
         // sort không hợp lệ
@@ -232,10 +234,15 @@ public class SearchService {
         );
     }
 
-    public List<String> suggest(String q, int size)
+    public SuggestResponse suggest(String q, int size)
     {
-        if(q == null || q.isBlank())
-            return List.of();
+        if (q == null || q.isBlank())
+            return new SuggestResponse(List.of(), List.of());   // KHÔNG trả null
+
+        if (q.length() > MAX_QUERY_LENGTH)
+            throw new SearchQueryTooLongException(q);     // → 400 SEARCH_QUERY_TOO_LONG
+
+        int clampedSize = Math.min(Math.max(size, 1), 10);
 
         Query query = Query.of(
                 root -> root.bool(
@@ -254,18 +261,42 @@ public class SearchService {
 
                 ));
 
-        int clampedSize = Math.min(size, 10);
         NativeQuery nativeQuery = NativeQuery.builder()
                 .withQuery(query)
-                .withSourceFilter(new FetchSourceFilter(true, new String[] {"name"}, null))
+                .withSourceFilter(new FetchSourceFilter(true, new String[] { "productId", "name", "slug", "thumbnail", "salePrice"}, null))
                 .withPageable(PageRequest.of(0, clampedSize))
                 .build();
 
-        SearchHits<ProductDocument> hits = elasticsearchOperations.search(nativeQuery, ProductDocument.class);
-        return hits.getSearchHits().stream()
-                .map(hit -> hit.getContent().getName())
+        SearchHits<ProductDocument> hits;
+        try {
+            hits = elasticsearchOperations.search(nativeQuery, ProductDocument.class);
+        } catch (DataAccessException | co.elastic.clients.elasticsearch._types.ElasticsearchException e) {
+            log.error("Elasticsearch lỗi khi suggest: q={}", q, e);
+            throw new ElasticsearchUnavailableException("Elasticsearch không phản hồi");   // → 503 ELASTICSEARCH_UNAVAILABLE
+        }
+
+        List<ProductDocument> productDocuments = hits.getSearchHits()
+                .stream().map(SearchHit::getContent)
                 .toList();
 
+        return new SuggestResponse(
+                productDocuments.stream().map(ProductDocument::getName)
+                        .filter(Objects::nonNull)
+                        .map(String::trim)
+                        .distinct()
+                        .limit(MAX_SUGGESTIONS)
+                        .map(name -> new SuggestionItem(name, "keyword"))
+                        .toList(),
+                productDocuments.stream().map(
+                        productDocument -> new SuggestProductItem(
+                                productDocument.getProductId(),
+                                productDocument.getName(),
+                                productDocument.getSlug(),
+                                productDocument.getThumbnail(),
+                                productDocument.getSalePrice()
+                        )
+                ).toList()
+        );
     }
 
     public JobReindexResponse startReindex()
