@@ -4,6 +4,7 @@ import com.ice.searchservice.DTO.Response.Common.ApiResponse;
 import com.ice.searchservice.DTO.Response.Search.PageSearchProductResponse;
 import com.ice.searchservice.DTO.Response.Search.SuggestResponse;
 import com.ice.searchservice.Service.SearchService;
+import com.ice.searchservice.Service.TrendingService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -19,6 +20,7 @@ import java.util.List;
 public class SearchController {
 
     private final SearchService searchService;
+    private final TrendingService trendingService;
 
     // GET /api/v1/search — full-text + filter + sort + aggregation
     @GetMapping
@@ -52,6 +54,19 @@ public class SearchController {
                 ApiResponse.success(
                         "retrieved successfully",
                         searchService.suggest(q, size)
+                )
+        );
+    }
+
+    @GetMapping("/trending")
+    public ResponseEntity<ApiResponse<List<String>>> trending(
+            @RequestParam(defaultValue = "10") Integer limit
+    )
+    {
+        return ResponseEntity.ok(
+                ApiResponse.success(
+                        "retrieved successfully",
+                        trendingService.getTrending(limit)
                 )
         );
     }

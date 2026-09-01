@@ -55,6 +55,7 @@ public class SearchService {
     private final ElasticsearchOperations elasticsearchOperations;
     private final RedisTemplate<String, Object> redisTemplate;
     private final SearchSyncService searchSyncService;
+    private final TrendingService trendingService;
 
     public PageSearchProductResponse search(String q, Integer page, Integer size, String categoryId, Long minPrice, Long maxPrice,
                                             List<String> colors, List<String> sizes, Double minRating, String sort)
@@ -221,6 +222,8 @@ public class SearchService {
 
         long totalElements = hits.getTotalHits();
         int totalPages = (int) Math.ceil((double) totalElements / safeSize);
+
+        trendingService.recordSearchTerm(q);
 
         return new PageSearchProductResponse(
                 content,
