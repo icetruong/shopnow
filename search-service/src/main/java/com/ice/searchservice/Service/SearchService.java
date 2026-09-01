@@ -16,6 +16,7 @@ import com.ice.searchservice.Enum.JobReindexStatus;
 import com.ice.searchservice.Enum.SortOption;
 import com.ice.searchservice.Exception.ElasticsearchUnavailableException;
 import com.ice.searchservice.Exception.InvalidSortOptionException;
+import com.ice.searchservice.Exception.ProductNotFoundException;
 import com.ice.searchservice.Exception.ResourceNotFoundException;
 import com.ice.searchservice.Exception.SearchQueryTooLongException;
 import lombok.RequiredArgsConstructor;
@@ -37,7 +38,9 @@ import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -51,6 +54,11 @@ public class SearchService {
     private static final String PRICE_FIELD = "basePrice";
     private static final int MAX_QUERY_LENGTH = 200;
     private static final int MAX_SUGGESTIONS = 8;
+    private static final String PRODUCT_INDEX = "products";
+    private static final int SIMILAR_MAX_SIZE = 20;
+    private static final int MLT_MIN_TERM_FREQ = 1;
+    private static final int MLT_MIN_DOC_FREQ = 1;   // index nhỏ → phải để 1, default 5 sẽ lọc sạch
+    private static final int MLT_MAX_QUERY_TERMS = 12;
 
     private final ElasticsearchOperations elasticsearchOperations;
     private final RedisTemplate<String, Object> redisTemplate;
@@ -330,6 +338,102 @@ public class SearchService {
                 processed,
                 progress
         );
+    }
+
+    public List<SearchProductResponse> similar(String productId, int size)
+    {
+        int safeSize = Math.min(Math.max(size, 1), SIMILAR_MAX_SIZE);
+
+        // 1. lấy sản phẩm gốc: vừa check tồn tại, vừa lấy categoryId cho fallback
+        ProductDocument seed;
+        try {
+            seed = elasticsearchOperations.get(productId, ProductDocument.class);
+        } catch (DataAccessException | co.elastic.clients.elasticsearch._types.ElasticsearchException e) {
+            log.error("Elasticsearch lỗi khi lấy seed similar: productId={}", productId, e);
+            throw new ElasticsearchUnavailableException("Elasticsearch không phản hồi");   // → 503
+        }
+        if (seed == null)
+            throw new ProductNotFoundException(productId);   // → 404 PRODUCT_NOT_FOUND
+
+        // 2. more_like_this: giống về name / description / categoryName
+        Query mltQuery = Query.of(root -> root.bool(b -> {
+            b.must(m -> m.moreLikeThis(mlt -> mlt
+                    .fields("name", "description", "categoryName")
+                    .like(l -> l.document(d -> d.index(PRODUCT_INDEX).id(productId)))
+                    .minTermFreq(MLT_MIN_TERM_FREQ)
+                    .minDocFreq(MLT_MIN_DOC_FREQ)
+                    .maxQueryTerms(MLT_MAX_QUERY_TERMS)));
+            b.filter(f -> f.term(t -> t.field("isActive").value(true)));
+            b.filter(f -> f.term(t -> t.field("isDeleted").value(false)));
+            b.mustNot(mn -> mn.ids(i -> i.values(productId)));   // loại chính sản phẩm gốc
+            return b;
+        }));
+
+        NativeQuery mltNative = NativeQuery.builder()
+                .withQuery(mltQuery)
+                .withPageable(PageRequest.of(0, safeSize))
+                .build();
+
+        List<SearchProductResponse> result = new ArrayList<>(runSimilar(mltNative, "similar"));
+
+        // 3. fallback: chưa đủ → bù bằng sản phẩm cùng danh mục, bán chạy nhất
+        if (result.size() < safeSize && seed.getCategoryId() != null) {
+            int need = safeSize - result.size();
+
+            List<String> excludeIds = new ArrayList<>();
+            excludeIds.add(productId);
+            result.forEach(r -> excludeIds.add(r.getProductId()));
+
+            Query fallbackQuery = Query.of(root -> root.bool(b -> {
+                b.filter(f -> f.term(t -> t.field("categoryId").value(seed.getCategoryId())));
+                b.filter(f -> f.term(t -> t.field("isActive").value(true)));
+                b.filter(f -> f.term(t -> t.field("isDeleted").value(false)));
+                b.mustNot(mn -> mn.ids(i -> i.values(excludeIds)));
+                return b;
+            }));
+
+            NativeQuery fallbackNative = NativeQuery.builder()
+                    .withQuery(fallbackQuery)
+                    .withSort(SortOptions.of(s -> s.field(f -> f.field("soldCount").order(SortOrder.Desc))))
+                    .withPageable(PageRequest.of(0, need))
+                    .build();
+
+            result.addAll(runSimilar(fallbackNative, "similar-fallback"));
+        }
+
+        return result;
+    }
+
+    // chạy query rồi map ProductDocument -> SearchProductResponse (không có highlight)
+    private List<SearchProductResponse> runSimilar(NativeQuery nativeQuery, String ctx)
+    {
+        SearchHits<ProductDocument> hits;
+        try {
+            hits = elasticsearchOperations.search(nativeQuery, ProductDocument.class);
+        } catch (DataAccessException | co.elastic.clients.elasticsearch._types.ElasticsearchException e) {
+            log.error("Elasticsearch lỗi ({})", ctx, e);
+            throw new ElasticsearchUnavailableException("Elasticsearch không phản hồi");   // → 503
+        }
+
+        return hits.getSearchHits().stream()
+                .map(searchHit -> {
+                    ProductDocument doc = searchHit.getContent();
+                    return new SearchProductResponse(
+                            doc.getProductId(),
+                            doc.getName(),
+                            doc.getSlug(),
+                            doc.getThumbnail(),
+                            doc.getBasePrice(),
+                            doc.getSalePrice(),
+                            computeDiscountPct(doc.getBasePrice(), doc.getSalePrice()),
+                            doc.getRating(),
+                            doc.getReviewCount(),
+                            doc.getSoldCount(),
+                            doc.getCategoryName(),
+                            Map.of()
+                    );
+                })
+                .toList();
     }
 
     private List<SortOptions> buildSort(SortOption sort) {

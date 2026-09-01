@@ -24,6 +24,12 @@ public class HandleGlobalException {
                 .body(ApiResponse.fail(ex.getMessage(), "NOT_FOUND"));
     }
 
+    @ExceptionHandler(ProductNotFoundException.class)
+    public ResponseEntity<ApiResponse<Void>> handleProductNotFound(ProductNotFoundException ex) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(ApiResponse.fail(ex.getMessage(), "PRODUCT_NOT_FOUND"));
+    }
+
     @ExceptionHandler(SearchQueryTooLongException.class)
     public ResponseEntity<ApiResponse<Void>> handleQueryTooLong(SearchQueryTooLongException ex) {
         return ResponseEntity.badRequest()

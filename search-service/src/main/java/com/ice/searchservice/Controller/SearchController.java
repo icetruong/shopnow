@@ -2,12 +2,14 @@ package com.ice.searchservice.Controller;
 
 import com.ice.searchservice.DTO.Response.Common.ApiResponse;
 import com.ice.searchservice.DTO.Response.Search.PageSearchProductResponse;
+import com.ice.searchservice.DTO.Response.Search.SearchProductResponse;
 import com.ice.searchservice.DTO.Response.Search.SuggestResponse;
 import com.ice.searchservice.Service.SearchService;
 import com.ice.searchservice.Service.TrendingService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -67,6 +69,21 @@ public class SearchController {
                 ApiResponse.success(
                         "retrieved successfully",
                         trendingService.getTrending(limit)
+                )
+        );
+    }
+
+    // GET /api/v1/search/similar/{productId} — sản phẩm tương tự (more_like_this)
+    @GetMapping("/similar/{productId}")
+    public ResponseEntity<ApiResponse<List<SearchProductResponse>>> similar(
+            @PathVariable String productId,
+            @RequestParam(defaultValue = "8") Integer size
+    )
+    {
+        return ResponseEntity.ok(
+                ApiResponse.success(
+                        "retrieved successfully",
+                        searchService.similar(productId, size)
                 )
         );
     }
