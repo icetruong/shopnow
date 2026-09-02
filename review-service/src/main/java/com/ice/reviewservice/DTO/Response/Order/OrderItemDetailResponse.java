@@ -1,4 +1,4 @@
-package com.ice.shippingservice.DTO.Response.Order;
+package com.ice.reviewservice.DTO.Response.Order;
 
 import lombok.AllArgsConstructor;
 import lombok.Getter;

@@ -1,6 +1,7 @@
 package com.ice.reviewservice.Exception;
 
 import com.ice.reviewservice.DTO.Response.Common.ApiResponse;
+import com.ice.reviewservice.Enum.ErrorCode;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -36,5 +37,40 @@ public class HandleGlobalException {
 
         return ResponseEntity.badRequest()
                 .body(ApiResponse.fail(message, "INVALID_REQUEST"));
+    }
+
+    @ExceptionHandler(OrderServiceUnavailableException.class)
+    public ResponseEntity<ApiResponse<Void>> handleOrderServiceUnavailable(OrderServiceUnavailableException ex)
+    {
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                .body(ApiResponse.fail(ex.getMessage(), ErrorCode.ORDER_SERVICE_UNAVAILABLE.name()));
+    }
+
+    @ExceptionHandler(OrderNotDeliveredException.class)
+    public ResponseEntity<ApiResponse<Void>> handleOrderNotDelivered(OrderNotDeliveredException ex)
+    {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(ApiResponse.fail(ex.getMessage(), ErrorCode.ORDER_NOT_DELIVERED.name()));
+    }
+
+    @ExceptionHandler(AlreadyReviewedException.class)
+    public ResponseEntity<ApiResponse<Void>> handleAlreadyReviewed(AlreadyReviewedException ex)
+    {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(ApiResponse.fail(ex.getMessage(), ErrorCode.ALREADY_REVIEWED.name()));
+    }
+
+    @ExceptionHandler(PurchaseRequiredException.class)
+    public ResponseEntity<ApiResponse<Void>> handlePurchaseRequired(PurchaseRequiredException ex)
+    {
+        return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                .body(ApiResponse.fail(ex.getMessage(), ErrorCode.PURCHASE_REQUIRED.name()));
+    }
+
+    @ExceptionHandler(UserServiceUnavailableException.class)
+    public ResponseEntity<ApiResponse<Void>> handleUserServiceUnavailable(UserServiceUnavailableException ex)
+    {
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                .body(ApiResponse.fail(ex.getMessage(), ErrorCode.USER_SERVICE_UNAVAILABLE.name()));
     }
 }

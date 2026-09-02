@@ -1,4 +1,4 @@
-package com.ice.notificationservice.DTO.Response.User;
+package com.ice.reviewservice.DTO.Response.User;
 
 import lombok.AllArgsConstructor;
 import lombok.Getter;

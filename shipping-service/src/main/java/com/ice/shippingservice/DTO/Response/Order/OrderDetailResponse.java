@@ -14,6 +14,7 @@ import java.util.List;
 @NoArgsConstructor
 public class OrderDetailResponse {
     private String orderId;
+    private String userId;
     private String orderCode;
     private String status;
     private List<OrderItemDetailResponse> items;
