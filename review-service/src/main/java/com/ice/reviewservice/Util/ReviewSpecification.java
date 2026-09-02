@@ -5,6 +5,7 @@ import com.ice.reviewservice.Entity.ReviewImage;
 import com.ice.reviewservice.Enum.ReviewStatus;
 import org.springframework.data.jpa.domain.Specification;
 
+import java.util.Collection;
 import java.util.UUID;
 
 public class ReviewSpecification {
@@ -37,6 +38,13 @@ public class ReviewSpecification {
                 status == null
                 ? null
                         : cb.equal(root.get("status"), status);
+    }
+
+    public static Specification<Review> hasStatusIn(Collection<ReviewStatus> statuses) {
+        return (root, q, cb) ->
+                (statuses == null || statuses.isEmpty())
+                        ? null
+                        : root.get("status").in(statuses);
     }
 
     public static Specification<Review> hasImage(Boolean hasImage)

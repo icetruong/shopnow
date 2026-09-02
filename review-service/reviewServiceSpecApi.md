@@ -159,7 +159,7 @@ sort      = newest       (newest | helpful | rating_high | rating_low)
 ---
 
 ### GET /reviews/me
-Lấy danh sách review **của chính user đang đăng nhập** (mọi trạng thái: PENDING / APPROVED / REJECTED). Dùng cho trang "Đánh giá của tôi".
+Lấy danh sách review **của chính user đang đăng nhập** (mọi trạng thái: PENDING / APPROVED / REJECTED / REPORTED). Dùng cho trang "Đánh giá của tôi".
 
 **Header:** `Authorization: Bearer {accessToken}` — bắt buộc, `userId` lấy từ claim `userId` của JWT.
 
@@ -167,7 +167,7 @@ Lấy danh sách review **của chính user đang đăng nhập** (mọi trạng
 ```
 page   = 0                          số trang, >= 0
 size   = 10                         số phần tử/trang, 1..100
-status = APPROVED                   optional — lọc theo trạng thái (PENDING | APPROVED | REJECTED)
+status = APPROVED                   optional — lọc theo trạng thái (PENDING | APPROVED | REJECTED | REPORTED)
 sort   = newest                     optional — newest (mặc định) | oldest
 ```
 
@@ -348,18 +348,19 @@ Danh sách review cần duyệt (status = PENDING hoặc bị report).
 ```
 page   = 0
 size   = 20
-status = PENDING     (PENDING | REPORTED)
+status = PENDING     (PENDING | REPORTED) — optional; bỏ trống = lọc cả PENDING + REPORTED
 ```
 
 **Response 200**
 ```json
 {
   "success": true,
+  "message": "Lấy danh sách đánh giá thành công!",
   "data": {
     "content": [
       {
         "reviewId":    "review-uuid-2",
-        "productName": "Áo Thun Nam",
+        "productId":   "prod-uuid-1",
         "userName":    "user123",
         "rating":      1,
         "comment":     "[nội dung có từ cấm]",
@@ -369,10 +370,14 @@ status = PENDING     (PENDING | REPORTED)
       }
     ],
     "page":          0,
-    "totalElements": 8
+    "size":          20,
+    "totalElements": 8,
+    "totalPages":    1
   }
 }
 ```
+
+> `productId` thay cho `productName` — bảng `reviews` không snapshot tên sản phẩm; FE tự resolve tên qua Product Service (giống `GET /reviews/pending`). Bỏ `status` khỏi query → mặc định trả cả review `PENDING` lẫn `REPORTED`.
 
 ---
 
@@ -513,7 +518,7 @@ Product Service gọi để lấy rating summary (khi cần đồng bộ).
 | variant_info | VARCHAR(100) | NULLABLE | Snapshot "Trắng - Size M" |
 | rating | SMALLINT | NOT NULL | 1–5 |
 | comment | TEXT | NULLABLE | |
-| status | VARCHAR(20) | NOT NULL, DEFAULT 'PENDING' | PENDING / APPROVED / REJECTED |
+| status | VARCHAR(20) | NOT NULL, DEFAULT 'PENDING' | PENDING / APPROVED / REJECTED / REPORTED (report_count vượt ngưỡng) |
 | flagged_reason | VARCHAR(50) | NULLABLE | Lý do bị flag (AUTO_PROFANITY...) |
 | helpful_count | INT | NOT NULL, DEFAULT 0 | |
 | report_count | INT | NOT NULL, DEFAULT 0 | |

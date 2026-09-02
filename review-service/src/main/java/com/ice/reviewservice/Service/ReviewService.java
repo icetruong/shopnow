@@ -4,6 +4,7 @@ import com.ice.reviewservice.Client.OrderClient;
 import com.ice.reviewservice.Client.UserClient;
 import com.ice.reviewservice.DTO.Event.Publish.ReviewPostedPayload;
 import com.ice.reviewservice.DTO.Request.Review.CreateReviewRequest;
+import com.ice.reviewservice.DTO.Request.Review.RejectReviewRequest;
 import com.ice.reviewservice.DTO.Request.Review.ReplyReviewRequest;
 import com.ice.reviewservice.DTO.Request.Review.UpdateReviewRequest;
 import com.ice.reviewservice.DTO.Response.Order.OrderDetailResponse;
@@ -22,6 +23,8 @@ import com.ice.reviewservice.Exception.ReviewNotFoundException;
 import com.ice.reviewservice.Repository.*;
 import com.ice.reviewservice.Util.ReviewSpecification;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -472,6 +475,104 @@ public class ReviewService {
         reviewReply.setContent(request.getContent());
         reviewReply.setRepliedBy(UUID.fromString(userId));
         reviewReplyRepo.save(reviewReply);
+    }
+
+    @Transactional(readOnly = true)
+    public PageReviewAdminResponse getReviewForAdmin(int page,int size, ReviewStatus status) {
+        // Không truyền status -> hàng chờ kiểm duyệt = PENDING + REPORTED
+        Specification<Review> specification = (status == null)
+                ? Specification.where(ReviewSpecification.hasStatusIn(List.of(ReviewStatus.PENDING, ReviewStatus.REPORTED)))
+                : Specification.where(ReviewSpecification.hasStatus(status));
+
+        Page<Review> reviews = reviewRepo.findAll(specification, PageRequest.of(page, size, resolveSort("newest")));
+
+        List<ReviewAdminResponse> reviewAdminResponses = reviews.getContent().stream()
+                .map(review -> new ReviewAdminResponse(
+                        review.getId().toString(),
+                        review.getProductId().toString(),
+                        review.getUserName(),
+                        review.getRating(),
+                        review.getComment(),
+                        review.getFlaggedReason(),
+                        review.getReportCount(),
+                        review.getCreatedAt().atZone(ZoneId.systemDefault()).toInstant()
+                )).toList();
+
+        return new PageReviewAdminResponse(
+                reviewAdminResponses,
+                reviews.getNumber(),
+                reviews.getSize(),
+                reviews.getTotalElements(),
+                reviews.getTotalPages()
+        );
+    }
+
+    @Transactional
+    public void approve(String reviewId) {
+        Review review = reviewRepo.findById(UUID.fromString(reviewId))
+                .orElseThrow(() -> new ReviewNotFoundException("not found review"));
+
+        if(review.getStatus() == ReviewStatus.APPROVED)
+            throw new IllegalArgumentException("review này đã được approved");
+
+        review.setStatus(ReviewStatus.APPROVED);
+        review.setFlaggedReason(null);
+        reviewRepo.save(review);
+
+        ProductRatingSummary productRatingSummary = applyRatingToSummary(review.getProductId(), review.getRating());
+
+        kafkaProducerService.publishReviewPostedEvent(new ReviewPostedPayload(
+                review.getId().toString(),
+                review.getProductId().toString(),
+                review.getUserId().toString(),
+                review.getRating().doubleValue(),
+                productRatingSummary.getAvgRating().doubleValue(),
+                productRatingSummary.getTotalReviews().longValue(),
+                ReviewPostAction.CREATED
+        ));
+    }
+
+    @Transactional
+    public void reject(String reviewId, RejectReviewRequest request) {
+        Review review = reviewRepo.findById(UUID.fromString(reviewId))
+                .orElseThrow(() -> new ReviewNotFoundException("not found review"));
+
+        if(review.getStatus() == ReviewStatus.REJECTED)
+            throw new IllegalArgumentException("review này đã được reject");
+        ReviewStatus oldStatus = review.getStatus();
+        review.setStatus(ReviewStatus.REJECTED);
+        review.setFlaggedReason(request.getReason());
+
+        reviewRepo.save(review);
+
+        if(oldStatus == ReviewStatus.APPROVED)
+        {
+            ProductRatingSummary productRatingSummary = productRatingSummaryRepo.findByIdForUpdate(review.getProductId())
+                    .orElseThrow(() -> new IllegalStateException(
+                            "Không tìm thấy rating summary cho product " + review.getProductId()
+                                    + " dù review đang APPROVED"));
+
+            productRatingSummary.setTotalReviews(productRatingSummary.getTotalReviews() - 1);
+            productRatingSummary.setSumRating(productRatingSummary.getSumRating() - review.getRating());
+            adjustCount(productRatingSummary, review.getRating(), -1);
+            productRatingSummary.setAvgRating(
+                    productRatingSummary.getTotalReviews() == 0
+                            ? BigDecimal.ZERO
+                            : BigDecimal.valueOf(productRatingSummary.getSumRating())
+                            .divide(BigDecimal.valueOf(productRatingSummary.getTotalReviews()), 2, RoundingMode.HALF_UP)
+            );
+            productRatingSummaryRepo.save(productRatingSummary);
+
+            kafkaProducerService.publishReviewPostedEvent(new ReviewPostedPayload(
+                    review.getId().toString(),
+                    review.getProductId().toString(),
+                    review.getUserId().toString(),
+                    review.getRating().doubleValue(),
+                    productRatingSummary.getAvgRating().doubleValue(),
+                    productRatingSummary.getTotalReviews().longValue(),
+                    ReviewPostAction.DELETED
+            ));
+        }
     }
 
     record ModerationResult(ReviewStatus status, String flaggedReason) {}
