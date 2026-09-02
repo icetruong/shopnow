@@ -159,11 +159,70 @@ sort      = newest       (newest | helpful | rating_high | rating_low)
 ---
 
 ### GET /reviews/me
-Lấy các review user đã viết.
+Lấy danh sách review **của chính user đang đăng nhập** (mọi trạng thái: PENDING / APPROVED / REJECTED). Dùng cho trang "Đánh giá của tôi".
 
-**Header:** `Authorization: Bearer {accessToken}`
+**Header:** `Authorization: Bearer {accessToken}` — bắt buộc, `userId` lấy từ claim `userId` của JWT.
 
-**Response 200:** Page danh sách review của user, kèm status (PENDING/APPROVED/REJECTED).
+**Query Params**
+```
+page   = 0                          số trang, >= 0
+size   = 10                         số phần tử/trang, 1..100
+status = APPROVED                   optional — lọc theo trạng thái (PENDING | APPROVED | REJECTED)
+sort   = newest                     optional — newest (mặc định) | oldest
+```
+
+**Response 200**
+```json
+{
+  "success": true,
+  "message": "Lấy danh sách đánh giá thành công!",
+  "data": {
+    "content": [
+      {
+        "reviewId":     "review-uuid-1",
+        "productId":    "prod-uuid-1",
+        "variantId":    "var-uuid-1",
+        "variantInfo":  "Trắng - Size M",
+        "rating":       5,
+        "comment":      "Áo đẹp, chất vải mát, đúng size.",
+        "images": [
+          "https://storage.shopnow.com/reviews/img1.jpg"
+        ],
+        "status":        "APPROVED",
+        "flaggedReason": null,
+        "helpfulCount":  12,
+        "shopReply": {
+          "content":   "Cảm ơn bạn đã ủng hộ shop ạ!",
+          "repliedAt": "2024-01-21T09:00:00Z"
+        },
+        "editable":   false,
+        "createdAt":  "2024-01-20T10:00:00Z",
+        "updatedAt":  "2024-01-20T10:00:00Z"
+      },
+      {
+        "reviewId":     "review-uuid-2",
+        "productId":    "prod-uuid-9",
+        "variantId":    "var-uuid-9",
+        "variantInfo":  "Đen - Size L",
+        "rating":       2,
+        "comment":      "Giao chậm, đóng gói sơ sài.",
+        "images":       [],
+        "status":        "PENDING",
+        "flaggedReason": "AUTO_PROFANITY",
+        "helpfulCount":  0,
+        "shopReply":     null,
+        "editable":      true,
+        "createdAt":     "2024-01-25T14:30:00Z",
+        "updatedAt":     "2024-01-25T14:30:00Z"
+      }
+    ],
+    "page":          0,
+    "size":          10,
+    "totalElements": 2,
+    "totalPages":    1
+  }
+}
+```
 
 ---
 
@@ -176,6 +235,7 @@ Lấy các sản phẩm user đã mua nhưng chưa review (nhắc user đánh gi
 ```json
 {
   "success": true,
+  "message": "Lấy danh sách đánh giá thành công!",
   "data": [
     {
       "orderId":     "order-uuid-2",

@@ -22,6 +22,6 @@ public class ReviewResponse {
     private String variantInfo;
     private Boolean isVerifiedPurchase;
     private Integer helpfulCount;
-    private ShopReplyResponse shopReplyResponse;
+    private ShopReplyResponse shopReply;
     private Instant createdAt;
 }

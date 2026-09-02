@@ -24,8 +24,19 @@ public class ReviewSpecification {
                         : cb.equal(root.get("productId"), productId);
     }
 
+    public static Specification<Review> hasUserId(UUID userId)
+    {
+        return (root, query, cb) ->
+                userId == null
+                        ? null
+                        : cb.equal(root.get("userId"), userId);
+    }
+
     public static Specification<Review> hasStatus(ReviewStatus status) {
-        return (root, q, cb) -> cb.equal(root.get("status"), status);
+        return (root, q, cb) ->
+                status == null
+                ? null
+                        : cb.equal(root.get("status"), status);
     }
 
     public static Specification<Review> hasImage(Boolean hasImage)

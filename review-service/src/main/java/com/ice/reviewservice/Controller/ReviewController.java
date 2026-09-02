@@ -3,7 +3,9 @@ package com.ice.reviewservice.Controller;
 import com.ice.reviewservice.DTO.Request.Review.CreateReviewRequest;
 import com.ice.reviewservice.DTO.Response.Common.ApiResponse;
 import com.ice.reviewservice.DTO.Response.Review.CreateReviewResponse;
+import com.ice.reviewservice.DTO.Response.Review.PageReviewMeResponse;
 import com.ice.reviewservice.DTO.Response.Review.ReviewPageResponse;
+import com.ice.reviewservice.Enum.ReviewStatus;
 import com.ice.reviewservice.Service.ReviewService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
@@ -54,6 +56,25 @@ public class ReviewController {
                 ApiResponse.success(
                         "Lấy danh sách đánh giá thành công!",
                         reviewService.getReview(page, size, rating, hasImage, sort, productId)
+                )
+        );
+    }
+
+    @GetMapping("/me")
+    public ResponseEntity<ApiResponse<PageReviewMeResponse>> getReviewMe(
+            @RequestParam(defaultValue = "0") @Min(0) int page,
+            @RequestParam(defaultValue = "10") @Min(1) @Max(100) int size,
+            @RequestParam(required = false) ReviewStatus status,
+            @RequestParam(defaultValue = "newest") String sort,
+            Authentication authentication
+    )
+    {
+        Jwt jwt = (Jwt) authentication.getPrincipal();
+        String userId = jwt.getClaimAsString("userId");
+        return ResponseEntity.ok(
+                ApiResponse.success(
+                        "Lấy danh sách đánh giá thành công!",
+                        reviewService.getMeReview(page, size, status, sort, userId)
                 )
         );
     }

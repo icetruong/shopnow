@@ -32,6 +32,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -40,6 +41,7 @@ import java.util.stream.Stream;
 @Service
 @RequiredArgsConstructor
 public class ReviewService {
+    private static final int EDIT_WINDOW_DAYS = 7;
 
     private final ReviewRepo reviewRepo;
     private final OrderClient orderClient;
@@ -49,7 +51,7 @@ public class ReviewService {
     private final KafkaProducerService kafkaProducerService;
     private final ReviewReplyRepo reviewReplyRepo;
 
-    @Transactional
+    @Transactional(readOnly = true)
     public CreateReviewResponse createReview(String userId, CreateReviewRequest request) {
 
         OrderDetailResponse orderDetailResponse = orderClient.getOrder(request.getOrderId());
@@ -220,6 +222,68 @@ public class ReviewService {
         );
     }
 
+    @Transactional(readOnly = true)
+    public PageReviewMeResponse getMeReview(int page, int size, ReviewStatus status, String sort, String userId) {
+        Specification<Review> specification = Specification.where(ReviewSpecification.hasStatus(status))
+                .and(ReviewSpecification.hasUserId(UUID.fromString(userId)));
+
+        Page<Review> reviews = reviewRepo.findAll(specification, PageRequest.of(page, size, resolveSort(sort)));
+
+        List<Review> content = reviews.getContent();
+        List<UUID> reviewIds = content.stream().map(Review::getId).toList();
+
+        Map<UUID, ReviewReply> replyByReview = reviewIds.isEmpty()
+                ? Map.of()
+                : reviewReplyRepo.findByReviewIdIn(reviewIds)
+                .stream().collect(Collectors.toMap(
+                        reviewReply -> reviewReply.getReview().getId(),
+                        reviewReply -> reviewReply
+                ));
+
+        Map<UUID, List<String>> imagesByReview = reviewIds.isEmpty()
+                ? Map.of()
+                : reviewImageRepo.findByReviewIdIn(reviewIds)
+                .stream().collect(Collectors.groupingBy(
+                        reviewImage -> reviewImage.getReview().getId(),
+                        Collectors.mapping(
+                                ReviewImage::getUrl,
+                                Collectors.toList()
+                        )
+                ));
+
+        List<ReviewMeResponse> reviewMeResponses = content.stream()
+                .map(review -> {
+                    ShopReplyResponse shopReplyResponse = Optional.ofNullable(replyByReview.get(review.getId()))
+                            .map(reviewReply -> new ShopReplyResponse(reviewReply.getContent(), reviewReply.getCreatedAt().atZone(ZoneId.systemDefault()).toInstant()))
+                            .orElse(null);
+
+                    return new ReviewMeResponse(
+                            review.getId().toString(),
+                            review.getProductId().toString(),
+                            review.getVariantId().toString(),
+                            review.getVariantInfo(),
+                            review.getRating(),
+                            review.getComment(),
+                            imagesByReview.getOrDefault(review.getId(), List.of()),
+                            review.getStatus().name(),
+                            review.getFlaggedReason(),
+                            review.getHelpfulCount(),
+                            shopReplyResponse,
+                            review.getCreatedAt().isAfter(LocalDateTime.now().minusDays(EDIT_WINDOW_DAYS)),
+                            review.getCreatedAt().atZone(ZoneId.systemDefault()).toInstant(),
+                            review.getUpdatedAt().atZone(ZoneId.systemDefault()).toInstant()
+                    );
+                }).toList();
+
+        return new PageReviewMeResponse(
+                reviewMeResponses,
+                reviews.getNumber(),
+                reviews.getSize(),
+                reviews.getTotalElements(),
+                reviews.getTotalPages()
+        );
+    }
+
     private static final Set<String> BANNED_WORDS = Set.of("lừa đảo", "đồ rác");
 
     record ModerationResult(ReviewStatus status, String flaggedReason) {}
@@ -265,6 +329,7 @@ public class ReviewService {
             case "helpful"     -> Sort.by(Sort.Direction.DESC, "helpfulCount");
             case "rating_high" -> Sort.by(Sort.Direction.DESC, "rating");
             case "rating_low"  -> Sort.by(Sort.Direction.ASC,  "rating");
+            case "oldest"      -> Sort.by(Sort.Direction.ASC, "createdAt");
             default            -> Sort.by(Sort.Direction.DESC, "createdAt"); // newest
         };
     }
