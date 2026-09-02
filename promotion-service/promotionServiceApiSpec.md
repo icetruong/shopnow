@@ -745,6 +745,8 @@ Publish trước khi flash sale bắt đầu (VD 15 phút trước) để Notifi
 {
   "eventId":   "uuid-v4",
   "eventType": "promotion.flash_sale_starting",
+  "timestamp": "2024-12-12T00:00:00Z",
+  "version":   "1.0",
   "payload": {
     "flashSaleId": "fs-uuid-1",
     "title":       "Flash Sale 12.12",

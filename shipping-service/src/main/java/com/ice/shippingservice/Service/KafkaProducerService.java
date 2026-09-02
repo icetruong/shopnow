@@ -13,7 +13,7 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class KafkaProducerService {
     private final KafkaTemplate<String, Object> kafkaTemplate;
-    private final static String SHIPMENT_UPDATE = "shipment.updated";
+    private static final String SHIPMENT_UPDATE = "shipment.updated";
 
     public void publishShipmentUpdate(ShipmentUpdatePayload payload)
     {
