@@ -297,6 +297,7 @@ Xóa review của mình.
 ```json
 {
   "success": true,
+  "message": "Đã đánh dấu đánh giá hữu ích.",
   "data": {
     "helpfulCount": 13,
     "isHelpful":    true

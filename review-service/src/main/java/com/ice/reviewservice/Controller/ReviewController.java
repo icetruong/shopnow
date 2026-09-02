@@ -3,10 +3,7 @@ package com.ice.reviewservice.Controller;
 import com.ice.reviewservice.DTO.Request.Review.CreateReviewRequest;
 import com.ice.reviewservice.DTO.Request.Review.UpdateReviewRequest;
 import com.ice.reviewservice.DTO.Response.Common.ApiResponse;
-import com.ice.reviewservice.DTO.Response.Review.CreateReviewResponse;
-import com.ice.reviewservice.DTO.Response.Review.PageReviewMeResponse;
-import com.ice.reviewservice.DTO.Response.Review.ReviewPageResponse;
-import com.ice.reviewservice.DTO.Response.Review.ReviewPendingResponse;
+import com.ice.reviewservice.DTO.Response.Review.*;
 import com.ice.reviewservice.Enum.ReviewStatus;
 import com.ice.reviewservice.Service.ReviewService;
 import jakarta.validation.Valid;
@@ -108,6 +105,36 @@ public class ReviewController {
                 ApiResponse.success(
                         "Đã cập nhật đánh giá.",
                         null
+                )
+        );
+    }
+
+    @DeleteMapping("/{reviewId}")
+    public ResponseEntity<ApiResponse<Void>> deleteReview(@PathVariable String reviewId, Authentication authentication)
+    {
+        Jwt jwt = (Jwt) authentication.getPrincipal();
+        String userId = jwt.getClaimAsString("userId");
+
+        reviewService.deleteReview(reviewId, userId);
+
+        return ResponseEntity.ok(
+                ApiResponse.success(
+                        "Đã xóa đánh giá.",
+                        null
+                )
+        );
+    }
+
+    @PostMapping("/{reviewId}/helpful")
+    public ResponseEntity<ApiResponse<HelpfulReviewResponse>> helpfulReview(@PathVariable String reviewId, Authentication authentication)
+    {
+        Jwt jwt = (Jwt) authentication.getPrincipal();
+        String userId = jwt.getClaimAsString("userId");
+
+        return ResponseEntity.ok(
+                ApiResponse.success(
+                        "Đã đánh dấu đánh giá hữu ích.",
+                        reviewService.helpfulReview(reviewId, userId)
                 )
         );
     }

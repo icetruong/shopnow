@@ -10,10 +10,7 @@ import com.ice.reviewservice.DTO.Response.Order.OrderItemDetailResponse;
 import com.ice.reviewservice.DTO.Response.Order.OrderTimelineResponse;
 import com.ice.reviewservice.DTO.Response.Review.*;
 import com.ice.reviewservice.DTO.Response.User.InternalUserResponse;
-import com.ice.reviewservice.Entity.ProductRatingSummary;
-import com.ice.reviewservice.Entity.Review;
-import com.ice.reviewservice.Entity.ReviewImage;
-import com.ice.reviewservice.Entity.ReviewReply;
+import com.ice.reviewservice.Entity.*;
 import com.ice.reviewservice.Enum.ReviewPostAction;
 import com.ice.reviewservice.Enum.ReviewStatus;
 import com.ice.reviewservice.Exception.AlreadyReviewedException;
@@ -21,10 +18,7 @@ import com.ice.reviewservice.Exception.EditWindowExpiredException;
 import com.ice.reviewservice.Exception.OrderNotDeliveredException;
 import com.ice.reviewservice.Exception.PurchaseRequiredException;
 import com.ice.reviewservice.Exception.ReviewNotFoundException;
-import com.ice.reviewservice.Repository.ProductRatingSummaryRepo;
-import com.ice.reviewservice.Repository.ReviewImageRepo;
-import com.ice.reviewservice.Repository.ReviewReplyRepo;
-import com.ice.reviewservice.Repository.ReviewRepo;
+import com.ice.reviewservice.Repository.*;
 import com.ice.reviewservice.Util.ReviewSpecification;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -55,6 +49,7 @@ public class ReviewService {
     private final ProductRatingSummaryRepo productRatingSummaryRepo;
     private final KafkaProducerService kafkaProducerService;
     private final ReviewReplyRepo reviewReplyRepo;
+    private final ReviewHelpfulRepo reviewHelpfulRepo;
 
     @Transactional
     public CreateReviewResponse createReview(String userId, CreateReviewRequest request) {
@@ -390,6 +385,78 @@ public class ReviewService {
 
 
     private static final Set<String> BANNED_WORDS = Set.of("lừa đảo", "đồ rác");
+
+    @Transactional
+    public void deleteReview(String reviewId, String userId) {
+        Review review = reviewRepo.findByIdAndUserId(UUID.fromString(reviewId), UUID.fromString(userId))
+                .orElseThrow(() -> new ReviewNotFoundException("not found review of user"));
+
+        if(review.getStatus() == ReviewStatus.APPROVED)
+        {
+            ProductRatingSummary productRatingSummary = productRatingSummaryRepo.findByIdForUpdate(review.getProductId())
+                    .orElseThrow(() -> new IllegalStateException(
+                            "Không tìm thấy rating summary cho product " + review.getProductId()
+                                    + " dù review đang APPROVED"));
+
+            productRatingSummary.setTotalReviews(productRatingSummary.getTotalReviews() - 1);
+            productRatingSummary.setSumRating(productRatingSummary.getSumRating() - review.getRating());
+            adjustCount(productRatingSummary, review.getRating(), -1);
+            productRatingSummary.setAvgRating(
+                    productRatingSummary.getTotalReviews() == 0
+                            ? BigDecimal.ZERO
+                            : BigDecimal.valueOf(productRatingSummary.getSumRating())
+                                    .divide(BigDecimal.valueOf(productRatingSummary.getTotalReviews()), 2, RoundingMode.HALF_UP)
+            );
+            productRatingSummaryRepo.save(productRatingSummary);
+
+            kafkaProducerService.publishReviewPostedEvent(new ReviewPostedPayload(
+                    review.getId().toString(),
+                    review.getProductId().toString(),
+                    review.getUserId().toString(),
+                    review.getRating().doubleValue(),
+                    productRatingSummary.getAvgRating().doubleValue(),
+                    productRatingSummary.getTotalReviews().longValue(),
+                    ReviewPostAction.DELETED
+            ));
+        }
+
+        reviewRepo.delete(review);
+    }
+
+    @Transactional
+    public HelpfulReviewResponse helpfulReview(String reviewId, String userId) {
+        Review review = reviewRepo.findById(UUID.fromString(reviewId))
+                .orElseThrow(() -> new ReviewNotFoundException("not found review"));
+
+        ReviewHelpful reviewHelpful = reviewHelpfulRepo.findByReviewIdAndUserId(UUID.fromString(reviewId), UUID.fromString(userId))
+                        .orElseGet(() -> ReviewHelpful.builder()
+                                .review(review)
+                                .userId(UUID.fromString(userId))
+                                .build());
+
+        if(reviewHelpful.getId() == null)
+        {
+            review.setHelpfulCount(review.getHelpfulCount()+1);
+            reviewHelpfulRepo.save(reviewHelpful);
+            reviewRepo.save(review);
+
+            return new HelpfulReviewResponse(
+                    review.getHelpfulCount(),
+                    true
+            );
+        }
+        else
+        {
+            review.setHelpfulCount(review.getHelpfulCount()-1);
+            reviewHelpfulRepo.delete(reviewHelpful);
+            reviewRepo.save(review);
+
+            return new HelpfulReviewResponse(
+                    review.getHelpfulCount(),
+                    false
+            );
+        }
+    }
 
     record ModerationResult(ReviewStatus status, String flaggedReason) {}
 
