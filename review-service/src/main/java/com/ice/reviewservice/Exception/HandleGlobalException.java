@@ -102,4 +102,10 @@ public class HandleGlobalException {
         return ResponseEntity.badRequest()
                 .body(ApiResponse.fail(ex.getMessage(), ErrorCode.EDIT_WINDOW_EXPIRED.name()));
     }
+
+    @ExceptionHandler(AlreadyReportedException.class)
+    public ResponseEntity<ApiResponse<Void>> handleAlreadyReported(AlreadyReportedException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(ApiResponse.fail(ex.getMessage(), ErrorCode.ALREADY_REPORTED.name()));
+    }
 }

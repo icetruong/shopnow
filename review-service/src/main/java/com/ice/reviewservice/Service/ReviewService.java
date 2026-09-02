@@ -3,10 +3,7 @@ package com.ice.reviewservice.Service;
 import com.ice.reviewservice.Client.OrderClient;
 import com.ice.reviewservice.Client.UserClient;
 import com.ice.reviewservice.DTO.Event.Publish.ReviewPostedPayload;
-import com.ice.reviewservice.DTO.Request.Review.CreateReviewRequest;
-import com.ice.reviewservice.DTO.Request.Review.RejectReviewRequest;
-import com.ice.reviewservice.DTO.Request.Review.ReplyReviewRequest;
-import com.ice.reviewservice.DTO.Request.Review.UpdateReviewRequest;
+import com.ice.reviewservice.DTO.Request.Review.*;
 import com.ice.reviewservice.DTO.Response.Order.OrderDetailResponse;
 import com.ice.reviewservice.DTO.Response.Order.OrderItemDetailResponse;
 import com.ice.reviewservice.DTO.Response.Order.OrderTimelineResponse;
@@ -15,6 +12,7 @@ import com.ice.reviewservice.DTO.Response.User.InternalUserResponse;
 import com.ice.reviewservice.Entity.*;
 import com.ice.reviewservice.Enum.ReviewPostAction;
 import com.ice.reviewservice.Enum.ReviewStatus;
+import com.ice.reviewservice.Exception.AlreadyReportedException;
 import com.ice.reviewservice.Exception.AlreadyReviewedException;
 import com.ice.reviewservice.Exception.EditWindowExpiredException;
 import com.ice.reviewservice.Exception.OrderNotDeliveredException;
@@ -22,9 +20,6 @@ import com.ice.reviewservice.Exception.PurchaseRequiredException;
 import com.ice.reviewservice.Exception.ReviewNotFoundException;
 import com.ice.reviewservice.Repository.*;
 import com.ice.reviewservice.Util.ReviewSpecification;
-import jakarta.validation.Valid;
-import jakarta.validation.constraints.Max;
-import jakarta.validation.constraints.Min;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -46,6 +41,8 @@ import java.util.stream.Stream;
 @RequiredArgsConstructor
 public class ReviewService {
     private static final int EDIT_WINDOW_DAYS = 7;
+    /** Số report tối thiểu để tự chuyển review sang REPORTED cho admin xem lại. */
+    private static final int REPORT_THRESHOLD = 5;
 
     private final ReviewRepo reviewRepo;
     private final OrderClient orderClient;
@@ -55,6 +52,7 @@ public class ReviewService {
     private final KafkaProducerService kafkaProducerService;
     private final ReviewReplyRepo reviewReplyRepo;
     private final ReviewHelpfulRepo reviewHelpfulRepo;
+    private final ReviewReportRepo reviewReportRepo;
 
     @Transactional
     public CreateReviewResponse createReview(String userId, CreateReviewRequest request) {
@@ -545,7 +543,7 @@ public class ReviewService {
 
         reviewRepo.save(review);
 
-        if(oldStatus == ReviewStatus.APPROVED)
+        if(oldStatus == ReviewStatus.APPROVED || oldStatus == ReviewStatus.REPORTED)
         {
             ProductRatingSummary productRatingSummary = productRatingSummaryRepo.findByIdForUpdate(review.getProductId())
                     .orElseThrow(() -> new IllegalStateException(
@@ -573,6 +571,30 @@ public class ReviewService {
                     ReviewPostAction.DELETED
             ));
         }
+    }
+
+    @Transactional
+    public void report(String reviewId, ReportReviewRequest request, String userId) {
+        Review review = reviewRepo.findById(UUID.fromString(reviewId))
+                .orElseThrow(() -> new ReviewNotFoundException("not found review"));
+
+        if (reviewReportRepo.existsByReviewIdAndUserId(UUID.fromString(reviewId), UUID.fromString(userId)))
+            throw new AlreadyReportedException("Bạn đã báo cáo đánh giá này rồi.");
+
+        ReviewReport reviewReport = ReviewReport.builder()
+                .review(review)
+                .userId(UUID.fromString(userId))
+                .reason(request.getReason())
+                .build();
+
+        review.setReportCount(review.getReportCount() + 1);
+        // Không kéo review đã bị admin ẩn (REJECTED) ngược lại hàng chờ
+        if (review.getReportCount() >= REPORT_THRESHOLD && review.getStatus() != ReviewStatus.REJECTED)
+            review.setStatus(ReviewStatus.REPORTED);
+
+        reviewRepo.save(review);
+
+        reviewReportRepo.save(reviewReport);
     }
 
     record ModerationResult(ReviewStatus status, String flaggedReason) {}

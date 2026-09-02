@@ -6,4 +6,5 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import java.util.UUID;
 
 public interface ReviewReportRepo extends JpaRepository<ReviewReport, UUID> {
+    boolean existsByReviewIdAndUserId(UUID reviewId, UUID userId);
 }

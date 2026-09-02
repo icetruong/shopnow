@@ -1,6 +1,7 @@
 package com.ice.reviewservice.Controller;
 
 import com.ice.reviewservice.DTO.Request.Review.CreateReviewRequest;
+import com.ice.reviewservice.DTO.Request.Review.ReportReviewRequest;
 import com.ice.reviewservice.DTO.Request.Review.UpdateReviewRequest;
 import com.ice.reviewservice.DTO.Response.Common.ApiResponse;
 import com.ice.reviewservice.DTO.Response.Review.*;
@@ -135,6 +136,22 @@ public class ReviewController {
                 ApiResponse.success(
                         "Đã đánh dấu đánh giá hữu ích.",
                         reviewService.helpfulReview(reviewId, userId)
+                )
+        );
+    }
+
+    @PostMapping("/{reviewId}/report")
+    public ResponseEntity<ApiResponse<Void>> reportReview(@PathVariable String reviewId, @Valid @RequestBody ReportReviewRequest request, Authentication authentication)
+    {
+        Jwt jwt = (Jwt) authentication.getPrincipal();
+        String userId = jwt.getClaimAsString("userId");
+
+        reviewService.report(reviewId, request, userId);
+
+        return ResponseEntity.ok(
+                ApiResponse.success(
+                        "Đã gửi báo cáo. Cảm ơn bạn.",
+                        null
                 )
         );
     }
