@@ -597,6 +597,29 @@ public class ReviewService {
         reviewReportRepo.save(reviewReport);
     }
 
+    @Transactional(readOnly = true)
+    public ProductReviewSummaryResponse getProductSummary(String productId) {
+        // Sản phẩm chưa có review nào -> trả summary rỗng (avg=0, total=0), không phải lỗi
+        ProductRatingSummary productRatingSummary = productRatingSummaryRepo.findById(UUID.fromString(productId))
+                .orElseGet(() -> ProductRatingSummary.builder()
+                        .productId(UUID.fromString(productId))
+                        .build());
+
+        Map<String, Integer> distribution = new LinkedHashMap<>();
+        distribution.put("5", productRatingSummary.getCount5());
+        distribution.put("4", productRatingSummary.getCount4());
+        distribution.put("3", productRatingSummary.getCount3());
+        distribution.put("2", productRatingSummary.getCount2());
+        distribution.put("1", productRatingSummary.getCount1());
+
+        return new ProductReviewSummaryResponse(
+                productRatingSummary.getProductId().toString(),
+                productRatingSummary.getAvgRating().doubleValue(),
+                productRatingSummary.getTotalReviews().longValue(),
+                distribution
+        );
+    }
+
     record ModerationResult(ReviewStatus status, String flaggedReason) {}
 
     private ModerationResult moderate(String comment) {
