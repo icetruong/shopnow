@@ -1,20 +1,16 @@
 package com.ice.productservice.DTO.Event;
 
-
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
+import java.util.List;
+
 @Getter
 @Setter
 @AllArgsConstructor
 @NoArgsConstructor
-public class KafkaEvent<T> {
-    private String eventId;
-    private String eventType;
-    private String timestamp;
-    private String version;
-    private T payload;
+public class StockChangedPayload {
+    private List<String> variantIds;
 }
-

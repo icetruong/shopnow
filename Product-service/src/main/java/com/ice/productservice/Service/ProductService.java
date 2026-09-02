@@ -2,6 +2,7 @@ package com.ice.productservice.Service;
 
 import com.ice.productservice.Client.InventoryClient;
 import com.ice.productservice.DTO.Event.ProductEventPayload;
+import com.ice.productservice.DTO.Event.ReviewPostedPayload;
 import com.ice.productservice.DTO.Request.Internal.ProductRatingInternalRequest;
 import com.ice.productservice.DTO.Request.Product.ProductRequest;
 import com.ice.productservice.DTO.Request.Product.ProductSetIsActiveRequest;
@@ -24,14 +25,12 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
-import org.springframework.data.redis.core.Cursor;
-import org.springframework.data.redis.core.RedisCallback;
-import org.springframework.data.redis.core.RedisTemplate;
-import org.springframework.data.redis.core.ScanOptions;
+import org.springframework.data.redis.core.*;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.DigestUtils;
 
+import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.ZoneOffset;
 import java.util.*;
@@ -39,6 +38,8 @@ import java.util.*;
 @Service
 @RequiredArgsConstructor
 public class ProductService {
+    private static final String PROCESSED_KEY = "processed:event:";
+    private static final Duration PROCESSED_TTL = Duration.ofHours(24);
 
     private final ProductRepo productRepo;
     private final CategoryRepo categoryRepo;
@@ -47,6 +48,7 @@ public class ProductService {
     private final RedisTemplate<String, Object> redisTemplate;
     private final KafkaProducerService kafkaProducerService;
     private final InventoryClient inventoryClient;
+    private final StringRedisTemplate stringRedisTemplate;
 
 
     public PageProductResponse getAllProduct(Integer page, Integer size, String sort, String direction, String categoryId, Long minPrice, Long maxPrice, Boolean isActive) {
@@ -241,6 +243,41 @@ public class ProductService {
                 products.getTotalPages(),
                 products.isLast()
         );
+    }
+
+    @Transactional
+    @CacheEvict(value = "products", allEntries = true)
+    public void onUpdateProductForPostReview(ReviewPostedPayload payload, String eventId)
+    {
+        String processedKey = PROCESSED_KEY + eventId;
+        if (Boolean.TRUE.equals(stringRedisTemplate.hasKey(processedKey)))
+            return;
+
+        Product product = productRepo.findById(UUID.fromString(payload.getProductId()))
+                .orElse(null);
+
+        // Product-service là chủ sở hữu product. Nếu không tìm thấy thì event này không
+        // xử lý được — bỏ qua (đánh dấu đã xử lý) thay vì ném exception để listener không
+        // retry vô hạn với cùng một message.
+        if (product == null) {
+            stringRedisTemplate.opsForValue().set(processedKey, "1", PROCESSED_TTL);
+            return;
+        }
+
+        product.setRating(toRating(payload.getAvgRating()));
+        product.setReviewCount(payload.getTotalReviews() == null ? 0 : payload.getTotalReviews().intValue());
+
+        productRepo.save(product);
+        kafkaProducerService.publish(product);
+
+        stringRedisTemplate.opsForValue().set(processedKey, "1", PROCESSED_TTL);
+    }
+
+    // cột rating là BigDecimal(3,2) NOT NULL — payload gửi Double nên phải convert,
+    // null (review cuối bị xoá) quy về 0.
+    private BigDecimal toRating(Double avgRating)
+    {
+        return avgRating == null ? BigDecimal.ZERO : BigDecimal.valueOf(avgRating);
     }
 
     private ProductDetailResponse toProductDetailResponse(Product product)

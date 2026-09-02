@@ -1,6 +1,6 @@
-package com.ice.reviewservice.DTO.Event.Publish;
+package com.ice.productservice.DTO.Event;
 
-import com.ice.reviewservice.Enum.ReviewPostAction;
+import com.ice.productservice.Enum.ReviewPostAction;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
