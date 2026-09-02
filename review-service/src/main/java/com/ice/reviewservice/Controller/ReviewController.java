@@ -1,6 +1,7 @@
 package com.ice.reviewservice.Controller;
 
 import com.ice.reviewservice.DTO.Request.Review.CreateReviewRequest;
+import com.ice.reviewservice.DTO.Request.Review.UpdateReviewRequest;
 import com.ice.reviewservice.DTO.Response.Common.ApiResponse;
 import com.ice.reviewservice.DTO.Response.Review.CreateReviewResponse;
 import com.ice.reviewservice.DTO.Response.Review.PageReviewMeResponse;
@@ -91,6 +92,22 @@ public class ReviewController {
                 ApiResponse.success(
                         "Lấy danh sách sản phẩm chờ đánh giá thành công!",
                         reviewService.getPendingReview(userId)
+                )
+        );
+    }
+
+    @PutMapping("/{reviewId}")
+    public ResponseEntity<ApiResponse<Void>> updateReview(@PathVariable String reviewId, @Valid @RequestBody UpdateReviewRequest request, Authentication authentication)
+    {
+        Jwt jwt = (Jwt) authentication.getPrincipal();
+        String userId = jwt.getClaimAsString("userId");
+
+        reviewService.updateReview(reviewId, request, userId);
+
+        return ResponseEntity.ok(
+                ApiResponse.success(
+                        "Đã cập nhật đánh giá.",
+                        null
                 )
         );
     }

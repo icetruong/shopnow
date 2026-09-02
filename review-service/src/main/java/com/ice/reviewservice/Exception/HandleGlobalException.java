@@ -90,4 +90,16 @@ public class HandleGlobalException {
         return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
                 .body(ApiResponse.fail(ex.getMessage(), ErrorCode.USER_SERVICE_UNAVAILABLE.name()));
     }
+
+    @ExceptionHandler(ReviewNotFoundException.class)
+    public ResponseEntity<ApiResponse<Void>> handleReviewNotFound(ReviewNotFoundException ex) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(ApiResponse.fail(ex.getMessage(), ErrorCode.REVIEW_NOT_FOUND.name()));
+    }
+
+    @ExceptionHandler(EditWindowExpiredException.class)
+    public ResponseEntity<ApiResponse<Void>> handleEditWindowExpired(EditWindowExpiredException ex) {
+        return ResponseEntity.badRequest()
+                .body(ApiResponse.fail(ex.getMessage(), ErrorCode.EDIT_WINDOW_EXPIRED.name()));
+    }
 }

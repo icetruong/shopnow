@@ -4,6 +4,7 @@ import com.ice.reviewservice.Client.OrderClient;
 import com.ice.reviewservice.Client.UserClient;
 import com.ice.reviewservice.DTO.Event.Publish.ReviewPostedPayload;
 import com.ice.reviewservice.DTO.Request.Review.CreateReviewRequest;
+import com.ice.reviewservice.DTO.Request.Review.UpdateReviewRequest;
 import com.ice.reviewservice.DTO.Response.Order.OrderDetailResponse;
 import com.ice.reviewservice.DTO.Response.Order.OrderItemDetailResponse;
 import com.ice.reviewservice.DTO.Response.Order.OrderTimelineResponse;
@@ -16,8 +17,10 @@ import com.ice.reviewservice.Entity.ReviewReply;
 import com.ice.reviewservice.Enum.ReviewPostAction;
 import com.ice.reviewservice.Enum.ReviewStatus;
 import com.ice.reviewservice.Exception.AlreadyReviewedException;
+import com.ice.reviewservice.Exception.EditWindowExpiredException;
 import com.ice.reviewservice.Exception.OrderNotDeliveredException;
 import com.ice.reviewservice.Exception.PurchaseRequiredException;
+import com.ice.reviewservice.Exception.ReviewNotFoundException;
 import com.ice.reviewservice.Repository.ProductRatingSummaryRepo;
 import com.ice.reviewservice.Repository.ReviewImageRepo;
 import com.ice.reviewservice.Repository.ReviewReplyRepo;
@@ -53,7 +56,7 @@ public class ReviewService {
     private final KafkaProducerService kafkaProducerService;
     private final ReviewReplyRepo reviewReplyRepo;
 
-    @Transactional(readOnly = true)
+    @Transactional
     public CreateReviewResponse createReview(String userId, CreateReviewRequest request) {
 
         OrderDetailResponse orderDetailResponse = orderClient.getOrder(request.getOrderId());
@@ -344,6 +347,48 @@ public class ReviewService {
                 );
     }
 
+    @Transactional
+    public void updateReview(String reviewId, UpdateReviewRequest request, String userId) {
+
+        Review review = reviewRepo.findByIdAndUserId(UUID.fromString(reviewId), UUID.fromString(userId))
+                .orElseThrow(() -> new ReviewNotFoundException("not found review of user"));
+
+        if (review.getCreatedAt().isBefore(LocalDateTime.now().minusDays(EDIT_WINDOW_DAYS)))
+            throw new EditWindowExpiredException("Quá " + EDIT_WINDOW_DAYS + " ngày, không sửa được đánh giá.");
+        Short oldRating = review.getRating();
+        review.setRating(request.getRating().shortValue());
+        review.setComment(request.getComment());
+
+        reviewRepo.save(review);
+
+        if(review.getStatus() == ReviewStatus.APPROVED)
+        {
+            ProductRatingSummary productRatingSummary = productRatingSummaryRepo.findByIdForUpdate(review.getProductId())
+                    .orElseThrow(() -> new IllegalStateException(
+                            "Không tìm thấy rating summary cho product " + review.getProductId()
+                                    + " dù review đang APPROVED"));
+
+            productRatingSummary.setSumRating(productRatingSummary.getSumRating() - oldRating + review.getRating());
+            adjustCount(productRatingSummary, review.getRating(), +1);
+            adjustCount(productRatingSummary, oldRating, -1);
+            productRatingSummary.setAvgRating(BigDecimal.valueOf(productRatingSummary.getSumRating())
+                    .divide(BigDecimal.valueOf(productRatingSummary.getTotalReviews()), 2, RoundingMode.HALF_UP));
+            productRatingSummaryRepo.save(productRatingSummary);
+
+            kafkaProducerService.publishReviewPostedEvent(new ReviewPostedPayload(
+                    review.getId().toString(),
+                    review.getProductId().toString(),
+                    review.getUserId().toString(),
+                    request.getRating().doubleValue(),
+                    productRatingSummary.getAvgRating().doubleValue(),
+                    productRatingSummary.getTotalReviews().longValue(),
+                    ReviewPostAction.UPDATED
+            ));
+        }
+
+    }
+
+
     private static final Set<String> BANNED_WORDS = Set.of("lừa đảo", "đồ rác");
 
     record ModerationResult(ReviewStatus status, String flaggedReason) {}
@@ -368,20 +413,25 @@ public class ReviewService {
 
         productRatingSummary.setTotalReviews(productRatingSummary.getTotalReviews() + 1);
         productRatingSummary.setSumRating(productRatingSummary.getSumRating() + rating);
-        productRatingSummary.setAvgRating((BigDecimal.valueOf(productRatingSummary.getSumRating())
-                .divide(BigDecimal.valueOf(productRatingSummary.getTotalReviews()), 2, RoundingMode.HALF_UP)));
+        productRatingSummary.setAvgRating(BigDecimal.valueOf(productRatingSummary.getSumRating())
+                .divide(BigDecimal.valueOf(productRatingSummary.getTotalReviews()), 2, RoundingMode.HALF_UP));
 
-        switch (rating)
-        {
-            case 5 -> productRatingSummary.setCount5(productRatingSummary.getCount5() + 1);
-            case 4 -> productRatingSummary.setCount4(productRatingSummary.getCount4() + 1);
-            case 3 -> productRatingSummary.setCount3(productRatingSummary.getCount3() + 1);
-            case 2 -> productRatingSummary.setCount2(productRatingSummary.getCount2() + 1);
-            case 1 -> productRatingSummary.setCount1(productRatingSummary.getCount1() + 1);
-
-        }
+        adjustCount(productRatingSummary, rating, +1);
 
         return productRatingSummaryRepo.save(productRatingSummary);
+    }
+
+    /** Tăng/giảm bộ đếm count5..count1 tương ứng với số sao. delta = +1 khi thêm, -1 khi bớt. */
+    private void adjustCount(ProductRatingSummary summary, int star, int delta)
+    {
+        switch (star)
+        {
+            case 5 -> summary.setCount5(summary.getCount5() + delta);
+            case 4 -> summary.setCount4(summary.getCount4() + delta);
+            case 3 -> summary.setCount3(summary.getCount3() + delta);
+            case 2 -> summary.setCount2(summary.getCount2() + delta);
+            case 1 -> summary.setCount1(summary.getCount1() + delta);
+        }
     }
 
     private Sort resolveSort(String sort) {
