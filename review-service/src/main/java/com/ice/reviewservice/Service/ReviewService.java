@@ -4,6 +4,7 @@ import com.ice.reviewservice.Client.OrderClient;
 import com.ice.reviewservice.Client.UserClient;
 import com.ice.reviewservice.DTO.Event.Publish.ReviewPostedPayload;
 import com.ice.reviewservice.DTO.Request.Review.CreateReviewRequest;
+import com.ice.reviewservice.DTO.Request.Review.ReplyReviewRequest;
 import com.ice.reviewservice.DTO.Request.Review.UpdateReviewRequest;
 import com.ice.reviewservice.DTO.Response.Order.OrderDetailResponse;
 import com.ice.reviewservice.DTO.Response.Order.OrderItemDetailResponse;
@@ -20,6 +21,7 @@ import com.ice.reviewservice.Exception.PurchaseRequiredException;
 import com.ice.reviewservice.Exception.ReviewNotFoundException;
 import com.ice.reviewservice.Repository.*;
 import com.ice.reviewservice.Util.ReviewSpecification;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -456,6 +458,20 @@ public class ReviewService {
                     false
             );
         }
+    }
+
+    public void replyReview(ReplyReviewRequest request, String reviewId, String userId) {
+        Review review = reviewRepo.findById(UUID.fromString(reviewId))
+                .orElseThrow(() -> new ReviewNotFoundException("not found review"));
+
+        ReviewReply reviewReply = reviewReplyRepo.findByReviewId(UUID.fromString(reviewId))
+                        .orElseGet(() -> ReviewReply.builder()
+                                .review(review)
+                                .build());
+
+        reviewReply.setContent(request.getContent());
+        reviewReply.setRepliedBy(UUID.fromString(userId));
+        reviewReplyRepo.save(reviewReply);
     }
 
     record ModerationResult(ReviewStatus status, String flaggedReason) {}
