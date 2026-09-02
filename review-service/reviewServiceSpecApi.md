@@ -114,6 +114,7 @@ sort      = newest       (newest | helpful | rating_high | rating_low)
 ```json
 {
   "success": true,
+  "message": "Lấy danh sách đánh giá thành công!",
   "data": {
     "content": [
       {

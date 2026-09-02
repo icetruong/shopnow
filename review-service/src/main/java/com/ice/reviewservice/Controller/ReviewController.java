@@ -3,20 +3,22 @@ package com.ice.reviewservice.Controller;
 import com.ice.reviewservice.DTO.Request.Review.CreateReviewRequest;
 import com.ice.reviewservice.DTO.Response.Common.ApiResponse;
 import com.ice.reviewservice.DTO.Response.Review.CreateReviewResponse;
+import com.ice.reviewservice.DTO.Response.Review.ReviewPageResponse;
 import com.ice.reviewservice.Service.ReviewService;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.oauth2.jwt.Jwt;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.validation.annotation.Validated;
+import org.springframework.web.bind.annotation.*;
 
 @RestController
 @RequiredArgsConstructor
+@Validated
 @RequestMapping("/api/v1/reviews")
 public class ReviewController {
 
@@ -36,5 +38,23 @@ public class ReviewController {
                                 reviewService.createReview(userId, request)
                         )
                 );
+    }
+
+    @GetMapping("/product/{productId}")
+    public ResponseEntity<ApiResponse<ReviewPageResponse>> getReview(
+            @RequestParam(defaultValue = "0") @Min(0) int page,
+            @RequestParam(defaultValue = "10") @Min(1) @Max(100) int size,
+            @RequestParam(required = false) Short rating,
+            @RequestParam(required = false) Boolean hasImage,
+            @RequestParam(defaultValue = "newest") String sort,
+            @PathVariable String productId
+    )
+    {
+        return ResponseEntity.ok(
+                ApiResponse.success(
+                        "Lấy danh sách đánh giá thành công!",
+                        reviewService.getReview(page, size, rating, hasImage, sort, productId)
+                )
+        );
     }
 }

@@ -6,11 +6,12 @@ import com.ice.reviewservice.DTO.Event.Publish.ReviewPostedPayload;
 import com.ice.reviewservice.DTO.Request.Review.CreateReviewRequest;
 import com.ice.reviewservice.DTO.Response.Order.OrderDetailResponse;
 import com.ice.reviewservice.DTO.Response.Order.OrderItemDetailResponse;
-import com.ice.reviewservice.DTO.Response.Review.CreateReviewResponse;
+import com.ice.reviewservice.DTO.Response.Review.*;
 import com.ice.reviewservice.DTO.Response.User.InternalUserResponse;
 import com.ice.reviewservice.Entity.ProductRatingSummary;
 import com.ice.reviewservice.Entity.Review;
 import com.ice.reviewservice.Entity.ReviewImage;
+import com.ice.reviewservice.Entity.ReviewReply;
 import com.ice.reviewservice.Enum.ReviewPostAction;
 import com.ice.reviewservice.Enum.ReviewStatus;
 import com.ice.reviewservice.Exception.AlreadyReviewedException;
@@ -18,8 +19,14 @@ import com.ice.reviewservice.Exception.OrderNotDeliveredException;
 import com.ice.reviewservice.Exception.PurchaseRequiredException;
 import com.ice.reviewservice.Repository.ProductRatingSummaryRepo;
 import com.ice.reviewservice.Repository.ReviewImageRepo;
+import com.ice.reviewservice.Repository.ReviewReplyRepo;
 import com.ice.reviewservice.Repository.ReviewRepo;
+import com.ice.reviewservice.Util.ReviewSpecification;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -40,6 +47,7 @@ public class ReviewService {
     private final ReviewImageRepo reviewImageRepo;
     private final ProductRatingSummaryRepo productRatingSummaryRepo;
     private final KafkaProducerService kafkaProducerService;
+    private final ReviewReplyRepo reviewReplyRepo;
 
     @Transactional
     public CreateReviewResponse createReview(String userId, CreateReviewRequest request) {
@@ -131,6 +139,87 @@ public class ReviewService {
         );
     }
 
+    public ReviewPageResponse getReview(int page, int size, Short rating, Boolean hasImage, String sort, String productId) {
+
+        UUID productUuid = UUID.fromString(productId);
+
+        Specification<Review> specification = Specification.where(ReviewSpecification.hasRating(rating))
+                .and(ReviewSpecification.hasProductId(productUuid))
+                .and(ReviewSpecification.hasImage(hasImage))
+                .and(ReviewSpecification.hasStatus(ReviewStatus.APPROVED));
+
+        Page<Review> reviews = reviewRepo.findAll(specification, PageRequest.of(page, size, resolveSort(sort)));
+        List<Review> content = reviews.getContent();
+        List<UUID> reviewIds = content.stream().map(Review::getId).toList();
+
+        // gom 1 query cho ảnh + 1 query cho shop reply, thay vì 2 query mỗi review (N+1)
+        Map<UUID, List<String>> imagesByReview = reviewIds.isEmpty()
+                ? Map.of()
+                : reviewImageRepo.findByReviewIdIn(reviewIds).stream()
+                .collect(Collectors.groupingBy(
+                        image -> image.getReview().getId(),
+                        Collectors.mapping(
+                                ReviewImage::getUrl, Collectors.toList()
+                        )
+                ));
+
+        Map<UUID, ReviewReply> replyByReview = reviewIds.isEmpty()
+                ? Map.of()
+                : reviewReplyRepo.findByReviewIdIn(reviewIds).stream()
+                .collect(Collectors.toMap(
+                        reviewReply -> reviewReply.getReview().getId(),
+                        reviewReply -> reviewReply
+                ));
+
+        List<ReviewResponse> reviewResponses = content.stream()
+                .map(review -> {
+                    ShopReplyResponse shopReply = Optional.ofNullable(replyByReview.get(review.getId()))
+                            .map(reply -> new ShopReplyResponse(
+                                    reply.getContent(),
+                                    reply.getCreatedAt().atZone(ZoneId.systemDefault()).toInstant()))
+                            .orElse(null);
+
+                    return new ReviewResponse(
+                            review.getId().toString(),
+                            maskName(review.getUserName()),
+                            review.getUserAvatar(),
+                            review.getRating().intValue(),
+                            review.getComment(),
+                            imagesByReview.getOrDefault(review.getId(), List.of()),
+                            review.getVariantInfo(),
+                            review.getIsVerifiedPurchase(),
+                            review.getHelpfulCount(),
+                            shopReply,
+                            review.getCreatedAt().atZone(ZoneId.systemDefault()).toInstant()
+                    );
+                }).toList();
+
+        ProductRatingSummary productRatingSummary = productRatingSummaryRepo
+                .findById(productUuid)
+                .orElseGet(() -> ProductRatingSummary.builder()
+                        .productId(productUuid)
+                        .build());
+
+        Map<String, Integer> distribution = new LinkedHashMap<>();
+        distribution.put("5", productRatingSummary.getCount5());
+        distribution.put("4", productRatingSummary.getCount4());
+        distribution.put("3", productRatingSummary.getCount3());
+        distribution.put("2", productRatingSummary.getCount2());
+        distribution.put("1", productRatingSummary.getCount1());
+
+        return new ReviewPageResponse(
+                reviewResponses,
+                page,
+                reviews.getTotalElements(),
+                new ReviewSummaryResponse(
+                        productRatingSummary.getAvgRating().doubleValue(),
+                        productRatingSummary.getTotalReviews().longValue(),
+                        distribution,
+                        reviewRepo.countReviewsWithImage(productUuid, ReviewStatus.APPROVED)
+                )
+        );
+    }
+
     private static final Set<String> BANNED_WORDS = Set.of("lừa đảo", "đồ rác");
 
     record ModerationResult(ReviewStatus status, String flaggedReason) {}
@@ -169,5 +258,32 @@ public class ReviewService {
         }
 
         return productRatingSummaryRepo.save(productRatingSummary);
+    }
+
+    private Sort resolveSort(String sort) {
+        return switch (sort) {
+            case "helpful"     -> Sort.by(Sort.Direction.DESC, "helpfulCount");
+            case "rating_high" -> Sort.by(Sort.Direction.DESC, "rating");
+            case "rating_low"  -> Sort.by(Sort.Direction.ASC,  "rating");
+            default            -> Sort.by(Sort.Direction.DESC, "createdAt"); // newest
+        };
+    }
+
+    /** "Nguyễn Văn A" -> "Nguyễn V. A" : giữ nguyên tên đầu, các từ sau chỉ còn chữ cái đầu. */
+    private String maskName(String fullName) {
+        if (fullName == null || fullName.isBlank())
+            return "Người dùng ẩn danh";
+
+        String[] parts = fullName.trim().split("\\s+");
+        if (parts.length == 1)
+            return parts[0];
+
+        StringBuilder masked = new StringBuilder(parts[0]);
+        for (int i = 1; i < parts.length; i++) {
+            masked.append(' ')
+                    .append(Character.toUpperCase(parts[i].charAt(0)))
+                    .append('.');
+        }
+        return masked.toString();
     }
 }

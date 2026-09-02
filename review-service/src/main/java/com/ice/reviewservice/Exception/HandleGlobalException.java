@@ -2,6 +2,7 @@ package com.ice.reviewservice.Exception;
 
 import com.ice.reviewservice.DTO.Response.Common.ApiResponse;
 import com.ice.reviewservice.Enum.ErrorCode;
+import jakarta.validation.ConstraintViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -33,6 +34,22 @@ public class HandleGlobalException {
                 .getFieldErrors()
                 .stream()
                 .map(error -> error.getField() + ": " + error.getDefaultMessage())
+                .collect(Collectors.joining(", "));
+
+        return ResponseEntity.badRequest()
+                .body(ApiResponse.fail(message, "INVALID_REQUEST"));
+    }
+
+    @ExceptionHandler(ConstraintViolationException.class)
+    public ResponseEntity<ApiResponse<Void>> handleConstraintViolation(ConstraintViolationException ex) {
+
+        String message = ex.getConstraintViolations()
+                .stream()
+                .map(violation -> {
+                    String path = violation.getPropertyPath().toString();
+                    String field = path.contains(".") ? path.substring(path.lastIndexOf('.') + 1) : path;
+                    return field + ": " + violation.getMessage();
+                })
                 .collect(Collectors.joining(", "));
 
         return ResponseEntity.badRequest()
