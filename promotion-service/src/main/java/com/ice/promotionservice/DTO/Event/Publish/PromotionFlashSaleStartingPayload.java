@@ -1,0 +1,4 @@
+package com.ice.promotionservice.DTO.Event.Publish;
+
+public class PromotionFlashSaleStartingPayload {
+}
