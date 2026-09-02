@@ -1,13 +1,13 @@
 package com.ice.orderservice.Controller.Internal;
 
 import com.ice.orderservice.DTO.Response.Order.OrderDetailResponse;
+import com.ice.orderservice.Enum.OrderStatus;
 import com.ice.orderservice.Service.OrderService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
 
 @RestController
 @RequestMapping("/api/v1/internal/orders")
@@ -21,6 +21,17 @@ public class OrderInternalController {
     {
         return ResponseEntity.ok(
                 orderService.getOrderDetailInternal(orderId)
+        );
+    }
+
+    @GetMapping
+    public ResponseEntity<List<OrderDetailResponse>> getOrderOfUser(
+            @RequestParam String userId,
+            @RequestParam(required = false) List<OrderStatus> statuses
+    )
+    {
+        return ResponseEntity.ok(
+                orderService.getOrderOfUser(userId, statuses)
         );
     }
 }

@@ -9,6 +9,9 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
+import java.util.Arrays;
+import java.util.List;
+
 @Component
 public class OrderClient {
 
@@ -44,6 +47,30 @@ public class OrderClient {
         }
         catch (ResourceNotFoundException e) {
             throw e;                                   // giữ nguyên 404
+        } catch (RestClientException e) {
+            throw new OrderServiceUnavailableException("Không gọi được order-service, thử lại sau");
+        }
+    }
+
+    public List<OrderDetailResponse> getOrderOfUser(String userId)
+    {
+        try {
+            // GET /api/v1/internal/orders?userId={userId}&statuses=DELIVERED&statuses=COMPLETED
+            OrderDetailResponse[] orders = restClient.get()
+                    .uri(uriBuilder -> uriBuilder
+                            .path("/api/v1/internal/orders")
+                            .queryParam("userId", userId)
+                            .queryParam("statuses", "DELIVERED", "COMPLETED")
+                            .build())
+                    .header("X-Internal-Token", internalToken)
+                    .retrieve()
+                    .onStatus(HttpStatusCode::isError, (req, res) -> {
+                        throw new OrderServiceUnavailableException(
+                                "order-service trả lỗi " + res.getStatusCode());
+                    })
+                    .body(OrderDetailResponse[].class);
+
+            return orders == null ? List.of() : Arrays.asList(orders);
         } catch (RestClientException e) {
             throw new OrderServiceUnavailableException("Không gọi được order-service, thử lại sau");
         }

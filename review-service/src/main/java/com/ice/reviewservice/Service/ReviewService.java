@@ -6,6 +6,7 @@ import com.ice.reviewservice.DTO.Event.Publish.ReviewPostedPayload;
 import com.ice.reviewservice.DTO.Request.Review.CreateReviewRequest;
 import com.ice.reviewservice.DTO.Response.Order.OrderDetailResponse;
 import com.ice.reviewservice.DTO.Response.Order.OrderItemDetailResponse;
+import com.ice.reviewservice.DTO.Response.Order.OrderTimelineResponse;
 import com.ice.reviewservice.DTO.Response.Review.*;
 import com.ice.reviewservice.DTO.Response.User.InternalUserResponse;
 import com.ice.reviewservice.Entity.ProductRatingSummary;
@@ -32,6 +33,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.*;
@@ -282,6 +284,64 @@ public class ReviewService {
                 reviews.getTotalElements(),
                 reviews.getTotalPages()
         );
+    }
+
+    public List<ReviewPendingResponse> getPendingReview(String userId) {
+        List<OrderDetailResponse> orderDetailResponses = orderClient.getOrderOfUser(userId);
+
+        List<Review> reviews = reviewRepo.findAllByUserId(UUID.fromString(userId));
+
+        Set<String> reviewed = reviews.stream().map(
+                review -> review.getOrderId() + "|" + review.getVariantId()
+        ).collect(Collectors.toSet());
+
+        List<ReviewPendingResponse> reviewPendingResponses = new ArrayList<>();
+
+        for (OrderDetailResponse orderDetailResponse : orderDetailResponses)
+        {
+            Instant deliverAt = extractDeliverAt(orderDetailResponse);
+
+            for(OrderItemDetailResponse orderItemDetailResponse : orderDetailResponse.getItems())
+            {
+                String key = orderDetailResponse.getOrderId() + "|" + orderItemDetailResponse.getVariantId();
+
+                if (reviewed.contains(key))
+                    continue;
+
+                String variantInfo = Stream.of(orderItemDetailResponse.getColor(), orderItemDetailResponse.getSize())
+                        .filter(Objects::nonNull)
+                        .collect(Collectors.joining(" - "));
+
+                reviewPendingResponses.add(new ReviewPendingResponse(
+                        orderDetailResponse.getOrderId(),
+                        orderItemDetailResponse.getProductId(),
+                        orderItemDetailResponse.getVariantId(),
+                        orderItemDetailResponse.getProductName(),
+                        orderItemDetailResponse.getThumbnail(),
+                        variantInfo,
+                        deliverAt
+                ));
+            }
+        }
+
+        return reviewPendingResponses;
+    }
+
+    private Instant extractDeliverAt(OrderDetailResponse orderDetailResponse)
+    {
+        if (orderDetailResponse.getTimeline() == null)
+            return null;
+
+        return orderDetailResponse.getTimeline().stream()
+                .filter(orderTimelineResponse -> orderTimelineResponse.getStatus().equals("DELIVERED"))
+                .map(OrderTimelineResponse::getAt)
+                .findFirst()
+                .orElseGet(() -> orderDetailResponse.getTimeline().stream()
+                        .filter(orderTimelineResponse -> orderTimelineResponse.getStatus().equals("COMPLETED"))
+                        .map(OrderTimelineResponse::getAt)
+                        .findFirst()
+                        .orElse(null)
+                );
     }
 
     private static final Set<String> BANNED_WORDS = Set.of("lừa đảo", "đồ rác");

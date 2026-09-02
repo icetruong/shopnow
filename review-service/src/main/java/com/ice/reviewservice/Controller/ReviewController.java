@@ -5,6 +5,7 @@ import com.ice.reviewservice.DTO.Response.Common.ApiResponse;
 import com.ice.reviewservice.DTO.Response.Review.CreateReviewResponse;
 import com.ice.reviewservice.DTO.Response.Review.PageReviewMeResponse;
 import com.ice.reviewservice.DTO.Response.Review.ReviewPageResponse;
+import com.ice.reviewservice.DTO.Response.Review.ReviewPendingResponse;
 import com.ice.reviewservice.Enum.ReviewStatus;
 import com.ice.reviewservice.Service.ReviewService;
 import jakarta.validation.Valid;
@@ -17,6 +18,8 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
 
 @RestController
 @RequiredArgsConstructor
@@ -75,6 +78,19 @@ public class ReviewController {
                 ApiResponse.success(
                         "Lấy danh sách đánh giá thành công!",
                         reviewService.getMeReview(page, size, status, sort, userId)
+                )
+        );
+    }
+
+    @GetMapping("/pending")
+    public ResponseEntity<ApiResponse<List<ReviewPendingResponse>>> getReviewPending(Authentication authentication)
+    {
+        Jwt jwt = (Jwt) authentication.getPrincipal();
+        String userId = jwt.getClaimAsString("userId");
+        return ResponseEntity.ok(
+                ApiResponse.success(
+                        "Lấy danh sách sản phẩm chờ đánh giá thành công!",
+                        reviewService.getPendingReview(userId)
                 )
         );
     }

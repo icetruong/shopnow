@@ -11,6 +11,7 @@ import lombok.Setter;
 @NoArgsConstructor
 public class OrderItemDetailResponse {
     private String variantId;
+    private String productId;
     private String productName;
     private String sku;
     private String color;

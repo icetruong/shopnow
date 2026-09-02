@@ -172,6 +172,7 @@ Lấy chi tiết 1 đơn hàng đầy đủ.
     "items": [
       {
         "variantId":  "var-uuid-1",
+        "productId":  "prod-uuid-1",
         "productName":"Áo Polo Nam Basic",
         "sku":        "POLO-WHITE-S",
         "color":      "Trắng",
@@ -290,6 +291,66 @@ Các service khác (Shipping, Notification) gọi để lấy thông tin order.
 **Header:** `X-Internal-Token: {sharedSecret}`
 
 **Response 200:** Giống GET /orders/{orderId} nhưng đầy đủ thông tin nội bộ.
+
+---
+
+### GET /internal/orders
+Lấy **danh sách order của 1 user**, lọc theo trạng thái. Review Service gọi để tính "sản phẩm chờ đánh giá" (`GET /reviews/pending`): diff các order đã giao với các review đã viết.
+
+**Header:** `X-Internal-Token: {sharedSecret}`
+
+**Query Params**
+```
+userId   = user-uuid-1              (bắt buộc, UUID)
+statuses = DELIVERED&statuses=COMPLETED
+                                    (optional, lặp lại được hoặc phân tách bằng dấu phẩy;
+                                     bỏ trống = mọi trạng thái)
+```
+
+**Response 200** — mảng phẳng `OrderDetailResponse[]`, **không bọc** envelope `ApiResponse` (giống `GET /internal/orders/{orderId}`). Mỗi phần tử có cấu trúc y hệt response của `GET /internal/orders/{orderId}` (bao gồm `items[].productId`, `timeline[]`).
+```json
+[
+  {
+    "orderId":     "order-uuid-1",
+    "userId":      "user-uuid-1",
+    "orderCode":   "SN240115001",
+    "status":      "DELIVERED",
+    "items": [
+      {
+        "variantId":  "var-uuid-1",
+        "productId":  "prod-uuid-1",
+        "productName":"Áo Polo Nam Basic",
+        "sku":        "POLO-WHITE-S",
+        "color":      "Trắng",
+        "size":       "S",
+        "thumbnail":  "https://storage.shopnow.com/products/ao-polo/thumb.jpg",
+        "unitPrice":  249000,
+        "qty":        2,
+        "subtotal":   498000
+      }
+    ],
+    "shippingAddress": { "fullName": "Nguyen Van A", "phone": "0901234567", "province": "TP. Hồ Chí Minh", "district": "Quận 1", "ward": "Phường Bến Nghé", "streetDetail": "123 Đường Lê Lợi" },
+    "pricing": { "subtotal": 498000, "discount": 49800, "shippingFee": 0, "total": 448200 },
+    "coupon":        "SALE10",
+    "paymentMethod": "VNPAY",
+    "paymentStatus": "PAID",
+    "note":          null,
+    "timeline": [
+      { "status": "PENDING",   "at": "2024-01-15T10:30:00Z" },
+      { "status": "CONFIRMED", "at": "2024-01-15T10:31:00Z" },
+      { "status": "SHIPPING",  "at": "2024-01-16T08:00:00Z" },
+      { "status": "DELIVERED", "at": "2024-01-18T14:00:00Z" }
+    ],
+    "createdAt":     "2024-01-15T10:30:00Z"
+  }
+]
+```
+
+**Ghi chú:**
+- `userId` không hợp lệ (không phải UUID) → `400`. Không có order nào khớp → `200` với mảng rỗng `[]` (không phải `404`).
+- `deliveredAt` mà Review Service cần = phần tử `timeline` có `status = "DELIVERED"` (fallback `COMPLETED` nếu không có).
+- Sắp xếp theo `createdAt` giảm dần.
+- **Chưa phân trang** — chấp nhận cho hiện tại. Mỗi order build lại full detail (address + items + timeline) nên có N+1; nếu user mua rất nhiều, sau này thêm `deliveredAfter` (VD 90 ngày) để giới hạn, hoặc tách DTO gọn chỉ gồm `items` + `timeline`.
 
 ---
 
@@ -481,6 +542,7 @@ REFUNDED    — Đã hoàn tiền xong
 | GET | /orders/{orderId} | ✅ | USER |
 | POST | /orders/{orderId}/cancel | ✅ | USER |
 | GET | /internal/orders/{orderId} | 🔒 Internal | — |
+| GET | /internal/orders?userId=&statuses= | 🔒 Internal | — |
 | GET | /admin/orders | ✅ | ADMIN |
 | PATCH | /admin/orders/{orderId}/status | ✅ | ADMIN |
 | POST | /admin/orders/{orderId}/cancel | ✅ | ADMIN |

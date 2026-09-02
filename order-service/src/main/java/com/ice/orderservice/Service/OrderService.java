@@ -425,6 +425,17 @@ public class OrderService {
         return buildOrderDetailResponse(order);
     }
 
+    public List<OrderDetailResponse> getOrderOfUser(String userId, List<OrderStatus> statuses) {
+        List<OrderStatus> filter = (statuses == null || statuses.isEmpty()) ?
+                List.of(OrderStatus.values())
+                : statuses;
+
+        return orderRepo.findAllByUserIdAndStatusIn(UUID.fromString(userId), filter)
+                .stream()
+                .map(this::buildOrderDetailResponse)
+                .toList();
+    }
+
     private OrderDetailResponse buildOrderDetailResponse(Order order) {
         OrderShippingAddress shippingAddress = orderShippingAddressRepo.findByOrderId(order.getId())
                 .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy địa chỉ giao hàng"));
@@ -432,6 +443,7 @@ public class OrderService {
         List<OrderItemDetailResponse> items = order.getOrderItems().stream()
                 .map(item -> new OrderItemDetailResponse(
                         item.getVariantId().toString(),
+                        item.getProductId().toString(),
                         item.getProductName(),
                         item.getSku(),
                         item.getColor(),
