@@ -347,4 +347,17 @@ public class PromotionService {
                 Instant.now()
         );
     }
+
+    public void deleteCoupon(UUID couponId) {
+        Coupon coupon = couponRepo.findById(couponId)
+                .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy coupon: " + couponId));
+
+        if(Boolean.FALSE.equals(coupon.getIsActive()))
+            throw new CouponAdminException(CouponAdminError.COUPON_ALREADY_INACTIVE);
+
+        coupon.setIsActive(false);
+        couponRepo.save(coupon);
+
+        couponCounterService.deleteUsage(coupon.getCode());
+    }
 }

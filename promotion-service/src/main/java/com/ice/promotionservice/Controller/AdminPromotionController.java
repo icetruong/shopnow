@@ -10,12 +10,7 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.PutMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 
 import java.util.UUID;
 
@@ -46,6 +41,19 @@ public class AdminPromotionController {
                 ApiResponse.success(
                         "Cập nhật coupon thành công",
                         promotionService.updateCoupon(couponId, request)
+                )
+        );
+    }
+
+    @DeleteMapping("/{couponId}")
+    public ResponseEntity<ApiResponse<Void>> deleteCoupon(@PathVariable UUID couponId)
+    {
+        promotionService.deleteCoupon(couponId);
+
+        return ResponseEntity.ok(
+                ApiResponse.success(
+                        "Đã vô hiệu hóa coupon",
+                        null
                 )
         );
     }

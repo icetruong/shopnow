@@ -54,6 +54,11 @@ public class CouponCounterService {
             stringRedisTemplate.expire(KEY_PREFIX_USAGE + code, ttl);
     }
 
+    public void deleteUsage(String code)
+    {
+        stringRedisTemplate.delete(KEY_PREFIX_USAGE+code);
+    }
+
     public Long getUserHadUsed(String code, String userId)
     {
         String raw = stringRedisTemplate.opsForValue().get(KEY_PREFIX_USER+code+":"+userId);

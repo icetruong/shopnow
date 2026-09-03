@@ -305,7 +305,7 @@ Vô hiệu hóa coupon — **soft delete** (set `is_active = false`), KHÔNG xó
 ```json
 {
   "success": true,
-  "message": "Đã vô hiệu hóa coupon SALE10."
+  "message": "Đã vô hiệu hóa coupon"
 }
 ```
 
