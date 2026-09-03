@@ -44,6 +44,7 @@ Kiểm tra mã giảm giá có hợp lệ không (gọi ở bước checkout).
 ```json
 {
   "success": true,
+  "message": "Mã giảm giá hợp lệ",
   "data": {
     "code":          "SALE10",
     "discountType":  "PERCENTAGE",
@@ -152,6 +153,7 @@ Lấy danh sách coupon user có thể dùng (hiển thị trang khuyến mãi).
 ```json
 {
   "success": true,
+  "message": "Lấy danh sách coupon thành công",
   "data": [
     {
       "code":          "SALE10",

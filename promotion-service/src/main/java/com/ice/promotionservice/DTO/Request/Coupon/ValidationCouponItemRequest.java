@@ -1,5 +1,8 @@
-package com.ice.promotionservice.DTO.Response.Coupon;
+package com.ice.promotionservice.DTO.Request.Coupon;
 
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Positive;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -9,9 +12,18 @@ import lombok.Setter;
 @Setter
 @AllArgsConstructor
 @NoArgsConstructor
-public class ValidationCouponItemResponse {
+public class ValidationCouponItemRequest {
+
+    @NotBlank
     private String productId;
+
     private String categoryId;
+
+    @NotNull
+    @Positive
     private Integer qty;
+
+    @NotNull
+    @Positive
     private Long price;
 }

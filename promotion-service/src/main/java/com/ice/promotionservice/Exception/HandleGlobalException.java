@@ -37,4 +37,10 @@ public class HandleGlobalException {
         return ResponseEntity.badRequest()
                 .body(ApiResponse.fail(message, "INVALID_REQUEST"));
     }
+
+    @ExceptionHandler(CouponInvalidException.class)
+    public ResponseEntity<ApiResponse<Void>> handleCouponInvalid(CouponInvalidException ex) {
+        return ResponseEntity.badRequest()
+                .body(ApiResponse.fail(ex.getMessage(), ex.getCouponInvalidReason().name()));
+    }
 }
