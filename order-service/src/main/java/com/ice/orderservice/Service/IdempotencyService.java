@@ -8,7 +8,7 @@ import java.time.Duration;
 
 @Service
 @RequiredArgsConstructor
-public class Idempotency {
+public class IdempotencyService {
     private final StringRedisTemplate stringRedisTemplate;
 
     private static final String PROCESSED_KEY = "processed:event:";

@@ -2,6 +2,9 @@
 
 > Tài liệu cho `order-service` (ShopNow). Viết theo kiểu học: giải thích khái niệm trước,
 > rồi soi vào code hiện tại, rồi đưa code giải pháp cụ thể.
+>
+> **Bản này chỉ tập trung 3 việc sẽ làm lần này** (B, D, E ở phần 3). Hai việc còn lại
+> (A, C) là refactor lớn — ghi lại ở [phần 8](#8-chưa-làm-lần-này) để làm sau.
 
 ---
 
@@ -9,13 +12,13 @@
 
 1. [Crash recovery là gì và tại sao phải quan tâm](#1-crash-recovery-là-gì)
 2. [Vấn đề gốc: Dual-write problem](#2-vấn-đề-gốc-dual-write-problem)
-3. [Soi từng lỗ hổng trong code hiện tại](#3-soi-từng-lỗ-hổng-trong-code-hiện-tại)
-4. [Giải pháp 1 — Transactional Outbox (quan trọng nhất)](#4-giải-pháp-1--transactional-outbox)
-5. [Giải pháp 2 — Saga Recovery Scheduler](#5-giải-pháp-2--saga-recovery-scheduler)
-6. [Giải pháp 3 — Idempotency (chống xử lý trùng)](#6-giải-pháp-3--idempotency)
-7. [Giải pháp 4 — Kafka error handler + Dead Letter Topic](#7-giải-pháp-4--kafka-error-handler--dead-letter-topic)
-8. [Thứ tự triển khai & checklist](#8-thứ-tự-triển-khai--checklist)
-9. [Những thứ được phép bỏ qua ở scope học](#9-những-thứ-được-phép-bỏ-qua)
+3. [Các lỗ hổng — và lần này làm cái nào](#3-các-lỗ-hổng--và-lần-này-làm-cái-nào)
+4. [Việc 1 (D) — Idempotency bằng Redis key *(hướng của bạn)*](#4-việc-1-d--idempotency-bằng-redis-key)
+5. [Việc 2 (E) — Log & nuốt lỗi trong listener *(hướng của bạn)*](#5-việc-2-e--log--nuốt-lỗi-trong-listener)
+6. [Việc 3 (B) — Saga Recovery Scheduler *(hướng của tôi — chỉ việc làm)*](#6-việc-3-b--saga-recovery-scheduler)
+7. [Thứ tự triển khai & checklist](#7-thứ-tự-triển-khai--checklist)
+8. [Chưa làm lần này (A, C, Outbox, DLT)](#8-chưa-làm-lần-này)
+9. [Tóm tắt 1 dòng](#9-tóm-tắt-1-dòng)
 
 ---
 
@@ -59,103 +62,61 @@ transaction đó. Nên có các kịch bản hỏng:
 
 | Thứ tự thực tế | Hậu quả |
 |---|---|
-| (1)(2) commit xong → **crash** → (3) chưa chạy | DB có order + saga, nhưng **event `order.created` không bao giờ được gửi**. `payment-service` / `shipping-service` không biết đơn tồn tại. Đơn kẹt vĩnh viễn. |
-| (3) gửi Kafka xong → **crash** → transaction (1)(2) **rollback** | Event đã bay đi báo "order X created", nhưng trong DB **không có order X**. Các service khác xử lý một đơn ma. |
-| `kafkaTemplate.send()` là **bất đồng bộ** — code hiện tại không `.get()`, không callback | Broker Kafka đang kẹt/mạng lỗi → `send()` fail âm thầm, **không ai biết**, không retry. Mất event ngay cả khi service không crash. |
+| (1)(2) commit xong → **crash** → (3) chưa chạy | DB có order + saga, nhưng **event `order.created` không bao giờ được gửi**. Đơn kẹt vĩnh viễn. |
+| (3) gửi Kafka xong → **crash** → transaction (1)(2) **rollback** | Event đã bay đi báo "order X created", nhưng trong DB **không có order X**. |
+| `kafkaTemplate.send()` là **bất đồng bộ** — code hiện tại không `.get()`, không callback | Broker Kafka kẹt/mạng lỗi → `send()` fail âm thầm, **không ai biết**, không retry. |
 
-> **Điểm mấu chốt:** không có cách nào làm cho "ghi DB" và "gửi Kafka" thành nguyên tử
-> (atomic) một cách trực tiếp. Giải pháp chuẩn là **Transactional Outbox**: biến "gửi Kafka"
-> thành "ghi thêm một dòng vào DB" (nằm chung transaction với dữ liệu nghiệp vụ), rồi có một
-> tiến trình nền đọc dòng đó và gửi Kafka sau. Xem [phần 4](#4-giải-pháp-1--transactional-outbox).
-
----
-
-## 3. Soi từng lỗ hổng trong code hiện tại
-
-### Lỗ hổng A — Mất event do dual-write *(nghiêm trọng nhất)*
-
-**Ở đâu:** `KafkaProducerService` dùng `kafkaTemplate.send(...)` kiểu "bắn rồi quên".
-Gọi từ `OrderService.createOrder()`, `PaymentProcessedListener`, `cancelledOrder()`.
-
-**Kịch bản crash (COD):**
-
-```
-t0  createOrder(): orderRepo.save + sageStateRepo.save  -> COMMIT thành công
-                    order.status = CONFIRMED, saga = COMPLETED trong DB
-t1  >>> CRASH <<<  (trước dòng kafkaProducerService.publishOrderCreatedEvent)
-t2  service bật lại
-```
-
-Kết quả: khách hàng mở app thấy đơn **CONFIRMED**, nhưng `shipping-service` chưa từng nhận
-`order.confirmed` → **không có đơn giao hàng nào được tạo**. Không có scheduler, không có
-retry nào phát hiện chuyện này.
-
-**Bằng chứng trong code:** `SagaState` đã có sẵn field `retryCount`, `failureReason` —
-rõ ràng người thiết kế định làm recovery nhưng chưa viết.
+> **Cách sửa gốc rễ** là **Transactional Outbox** (biến "gửi Kafka" thành "ghi thêm 1 dòng
+> DB" chung transaction). Đây là refactor lớn — **để sau**, xem [phần 8](#8-chưa-làm-lần-này).
+> Lần này ta xử lý phần **hậu quả xảy ra khi đã lỡ crash**: đơn kẹt thì có job quét và cứu
+> (việc B), message trùng thì xử lý lại không sao (việc D), message lỗi thì không làm nghẽn
+> partition (việc E).
 
 ---
 
-### Lỗ hổng B — Không có job phục hồi saga bị kẹt
+## 3. Các lỗ hổng — và lần này làm cái nào
+
+| Mã | Lỗ hổng | Mức độ | Lần này? | Hướng đi |
+|----|---------|--------|----------|----------|
+| A | Mất event do dual-write (`kafkaTemplate.send` bắn-rồi-quên) | 🔴 Cao | ❌ Chưa (cần Outbox) | [phần 8](#8-chưa-làm-lần-này) — tạm thời việc B gánh đỡ |
+| **B** | **Không có job phục hồi saga bị kẹt** | 🔴 Cao | ✅ **Làm** | Scheduler quét `saga_state` cũ → đẩy tiếp / bồi hoàn / FAILED *(hướng của tôi)* |
+| C | REST call nằm trong `@Transactional` của `createOrder` | 🟠 Vừa | ❌ Chưa (refactor lớn) | [phần 8](#8-chưa-làm-lần-này) |
+| **D** | **Message bị xử lý lại gây kẹt (poison message)** | 🟠 Vừa | ✅ **Làm** | Idempotency: lưu `eventId` vào **Redis key**, message trùng thì bỏ qua *(hướng của bạn)* |
+| **E** | **`@KafkaListener` không có error handler → retry churn** | 🟠 Vừa | ✅ **Làm** | Trong listener: **log đầy đủ rồi nuốt lỗi**, không ném lại → không retry vô hạn *(hướng của bạn)* |
+
+### Chi tiết 3 lỗ hổng sẽ làm
+
+#### B — Không có job phục hồi saga bị kẹt
 
 **Ở đâu:** `SageStateRepo` chỉ có `findByOrderId()`. Không có query kiểu "tìm saga đang
-STARTED quá lâu". Không có `@Scheduled` nào trong `order-service` (chưa có `@EnableScheduling`).
+`STARTED` quá lâu". Không có `@Scheduled` nào (chưa `@EnableScheduling`).
 
 **Kịch bản (thanh toán online):**
 
 ```
-t0  createOrder(): order.status = PENDING, saga.currentStep = STOCK_RESERVED
+t0  createOrder(): order.status = PENDING, saga.currentStep = STOCK_RESERVED, saga = STARTED
 t1  publish order.created -> Kafka OK
-t2  payment-service NHẬN được, nhưng CRASH trước khi publish payment.processed
+t2  payment-service NHẬN được nhưng CRASH trước khi publish payment.processed
     (hoặc payment.processed bị mất)
 ```
 
-`order-service` ngồi chờ `payment.processed` **mãi mãi**. Đơn kẹt `PENDING`, kho vẫn giữ
-`reservedQty` (reservation ở inventory sẽ tự expire sau 15 phút và nhả kho — nhưng **order
-thì không tự chuyển sang CANCELLED**, vì `stock.released` do expiry có `StockEventListener`
-xử lý hay không thì cần kiểm tra riêng).
+`order-service` ngồi chờ `payment.processed` **mãi mãi**. Đơn kẹt `PENDING`. Reservation ở
+inventory sẽ tự expire sau 15 phút và nhả kho, **nhưng order thì không tự chuyển `CANCELLED`**.
 
-**Cần:** một scheduler quét `saga_state` theo `updatedAt` cũ + `sagaStatus = STARTED`, rồi
-quyết định *đẩy tiếp* hay *bồi hoàn (compensate)* hay *đánh dấu FAILED để người xử lý tay*.
+**Cần:** một scheduler quét `saga_state` theo `updatedAt` cũ + `sagaStatus IN (STARTED,
+COMPENSATING)`, rồi quyết định *đẩy tiếp* hay *bồi hoàn (compensate)* hay *đánh dấu `FAILED`
+để người xử lý tay*. **Bằng chứng người thiết kế đã định làm:** `SagaState` có sẵn field
+`retryCount`, `failureReason`.
 
----
+> Vì lần này **chưa làm Outbox (A)**, scheduler này gánh luôn việc phát hiện đơn kẹt do
+> **mất event** `order.created` / `order.confirmed`, không chỉ do payment-service chết.
 
-### Lỗ hổng C — REST call nằm trong `@Transactional` của `createOrder`
+#### D — Message bị xử lý lại gây kẹt (poison message)
 
-**Ở đâu:** `OrderService.createOrder()` là `@Transactional`. Bên trong nó gọi:
+**Ở đâu:** `PaymentProcessedListener.handlePaymentProcessed()` — cả method là `@Transactional`.
 
-```java
-inventoryClient.reserve(...)        // REST -> đổi DB inventory-service NGAY
-paymentClient.createPayment(...)    // REST -> đổi DB payment-service NGAY
-inventoryClient.deduct(...)         // REST (nhánh COD)
-```
-
-Những call này gây **side effect ở service khác ngay lập tức**, nhưng transaction DB của
-`order-service` thì **chưa commit** (commit ở cuối method).
-
-**Kịch bản:** `inventoryClient.reserve()` OK, `paymentClient.createPayment()` OK, rồi tới
-`orderRepo.save(saveOrder)` / commit **thất bại** (DB rớt kết nối, constraint, deadlock...).
-
-- Nhánh `catch` chỉ chạy khi **REST call ném exception** — commit fail thì không rơi vào
-  các `catch` đó.
-- Kết quả: payment đã tạo + kho đã reserve, nhưng **order không tồn tại**. Reservation thì
-  15 phút nữa scheduler của inventory nhả; còn **payment thì không có gì thu dọn**.
-
-**Hướng xử lý (theo thứ tự dễ → chuẩn):**
-
-1. Ngắn hạn: chấp nhận, vì `createPayment` khi chưa có order thật thì cũng ít hại — nhưng
-   nên có job đối soát payment "mồ côi".
-2. Chuẩn: **đưa các REST call ra khỏi `@Transactional`** — commit order (PENDING) trước,
-   rồi mới gọi inventory/payment ở bước sau (đúng tinh thần Saga từng bước). Đây là refactor
-   lớn, làm sau khi đã có Outbox + Saga recovery.
-
----
-
-### Lỗ hổng D — Message bị xử lý lại gây kẹt (poison message)
-
-**Ở đâu:** `PaymentProcessedListener.handlePaymentProcessed()`.
-
-Kafka giao hàng theo kiểu **at-least-once**: nếu listener chạy xong phần việc nhưng service
-crash **trước khi commit offset**, Kafka sẽ **gửi lại** message đó khi bật lại.
+Kafka giao **at-least-once**: nếu listener chạy xong phần việc nhưng service crash **trước
+khi commit offset**, Kafka sẽ **gửi lại** message đó khi bật lại.
 
 **Kịch bản:**
 
@@ -164,312 +125,333 @@ t0  listener nhận payment.processed (SUCCESS)
 t1  inventoryClient.deduct(...) -> inventory-service COMMIT: reservation RESERVED -> DEDUCTED
 t2  >>> CRASH <<< (trước orderRepo.save)  -> transaction order-service rollback, offset CHƯA commit
 t3  service bật lại -> Kafka gửi lại payment.processed
-t4  listener chạy lại: order vẫn PENDING -> qua được guard `if (status == CONFIRMED...)`
-t5  inventoryClient.deduct(...) lần 2 -> inventory tìm reservation RESERVED -> KHÔNG còn
-    -> ném ResourceNotFoundException("no reserved stock found")
-t6  listener fail -> Kafka lại gửi lại -> lặp vô hạn -> đơn kẹt PENDING
+t4  listener chạy lại: order vẫn PENDING -> qua được guard "if (status == CONFIRMED...)"
+t5  inventoryClient.deduct(...) lần 2 -> inventory không còn reservation RESERVED
+    -> ném ResourceNotFoundException
+t6  (mặc định Spring Kafka) retry -> lại fail -> ... -> đơn kẹt PENDING
 ```
 
-**Hai chỗ phải sửa:**
+**Hướng xử lý (hướng của bạn):** trước khi xử lý, tra `eventId` trong **Redis**. Đã thấy →
+message trùng → bỏ qua. Chưa thấy → xử lý xong mới ghi key. Xem [phần 4](#4-việc-1-d--idempotency-bằng-redis-key).
 
-- **Guard của listener** nên dựa trên `sagaState.getCompletedSteps()` (`"STOCK_DEDUCTED"`),
-  không chỉ dựa `order.getStatus()`.
-- **Inventory `deduct/release/reserve` phải idempotent theo `orderId`**: gọi lần 2 thì trả
-  về "OK, đã làm rồi" thay vì ném lỗi. Xem [phần 6](#6-giải-pháp-3--idempotency).
+> Redis key chặn tốt các loại **trùng do rebalance / replay tay / publish trùng**. Riêng
+> đúng cái khe crash ở `t2` (inventory đã commit, order-service chưa) thì Redis không cứu
+> được một mình — chỗ đó **việc E** (nuốt lỗi, không loop) + **việc B** (scheduler dọn đơn
+> kẹt) lo. Ba việc bọc cho nhau.
 
----
+#### E — `@KafkaListener` không có error handler
 
-### Lỗ hổng E — `@KafkaListener` không có error handler / DLT
+Nếu một message lỗi (parse hỏng, bug logic, service phụ thuộc đang chết), Spring Kafka bản
+mới **mặc định thử lại ~10 lần sát nhau rồi mới bỏ qua** (tài liệu cũ hay nói "vô hạn" —
+không còn đúng). Vẫn có 2 vấn đề:
 
-Nếu một message lỗi (parse hỏng, bug logic), Spring Kafka mặc định sẽ **retry ngay, vô hạn**,
-làm **nghẽn cả partition** — các message sau không được xử lý. Cần `DefaultErrorHandler` +
-**Dead Letter Topic** (`payment.processed.DLT`) để sau N lần fail thì đẩy message hỏng sang
-chỗ khác và đi tiếp. Xem [phần 7](#7-giải-pháp-4--kafka-error-handler--dead-letter-topic).
+1. 10 lần retry sát nhau vẫn **làm nghẽn partition** một lúc — message sau phải chờ.
+2. Message hỏng cuối cùng **bị bỏ âm thầm**, log mặc định khó thấy.
 
----
+**Hướng xử lý (hướng của bạn):** trong listener tự `try/catch`, **log ở mức ERROR kèm toàn
+bộ nội dung message** rồi **return bình thường (không ném lại)**. Listener return êm →
+Spring Kafka commit offset → **bỏ ngay, không retry, không nghẽn**, và log to để mình chủ
+động replay tay. Xem [phần 5](#5-việc-2-e--log--nuốt-lỗi-trong-listener).
 
 ### Phần ĐÃ ổn (không phải làm gì)
 
 - **Reservation mồ côi** khi crash trước lúc order commit → `inventory-service`
   `SchedulerStockReserve.autoExpireReservations()` chạy mỗi 60s, tự expire sau 15 phút.
-- **Guard idempotency cơ bản** trong `PaymentProcessedListener` (check status) — đúng hướng,
-  chỉ cần củng cố như mục D.
+- **Guard idempotency cơ bản** trong `PaymentProcessedListener` / `StockEventListener`
+  (check `order.getStatus()`) — đúng hướng, việc D sẽ củng cố thêm.
 
 ---
 
-## 4. Giải pháp 1 — Transactional Outbox
+## 4. Việc 1 (D) — Idempotency bằng Redis key
 
 ### Ý tưởng
 
-Thay vì `order-service` **tự gửi Kafka** trong lúc xử lý (dual write), ta:
+"Idempotent" = gọi 1 lần hay 10 lần **kết quả cuối giống nhau**.
 
-1. Khi xử lý nghiệp vụ: **ghi event vào bảng `outbox_event` trong CÙNG transaction** với
-   `orders` / `saga_state`. → Atomic: hoặc cả order + event cùng lưu, hoặc không gì cả.
-2. Một **tiến trình nền** (`@Scheduled`) đọc các dòng `outbox_event` chưa gửi, **gửi lên
-   Kafka**, gửi xong thì đánh dấu `SENT`.
-3. Nếu crash giữa chừng: bật lại, scheduler thấy dòng vẫn `PENDING` → gửi lại. **Không mất
-   event.** (Đổi lại: có thể gửi **trùng** → consumer phải idempotent, xem phần 6.)
+Mỗi `KafkaEvent` đã có sẵn field `eventId` (chuỗi UUID, do service gửi sinh ra 1 lần). Ta
+dùng nó làm khóa:
 
 ```
-createOrder()  ──┐
-                 │  1 transaction duy nhất
-   orders ───────┤
-   saga_state ───┤
-   outbox_event ─┘   (status = PENDING)
-                          │
-                          │  OutboxRelayScheduler (mỗi 2s)
-                          ▼
-                     Kafka topic  ──> payment-service / shipping-service ...
-                          │
-                          ▼
-                   outbox_event.status = SENT
+listener nhận message
+   │
+   ├─ Redis GET "order-service:processed-event:<eventId>"  ──> có? => message trùng, RETURN
+   │
+   ├─ xử lý nghiệp vụ (@Transactional) ...
+   │
+   └─ xử lý XONG XUÔI => Redis SET key, TTL 7 ngày   (đánh dấu "đã xử lý")
 ```
 
-### 4.1. Bảng DB
+Đánh dấu **sau khi** transaction nghiệp vụ commit xong, không phải trước — để nếu xử lý
+ném lỗi thì key **không** được ghi, message vẫn được coi là "chưa xử lý".
 
-`order-service` hiện không dùng Flyway. Nếu `spring.jpa.hibernate.ddl-auto=update` thì entity
-bên dưới đủ để Hibernate tự tạo bảng. Nếu bạn chạy SQL tay:
+### 4.1. Thêm dependency Redis
 
-```sql
-CREATE TABLE outbox_event (
-    id              UUID PRIMARY KEY,
-    aggregate_type  VARCHAR(50)  NOT NULL,   -- 'ORDER'
-    aggregate_id    VARCHAR(64)  NOT NULL,   -- orderId, dùng làm Kafka key
-    topic           VARCHAR(100) NOT NULL,   -- 'order.created'
-    event_type      VARCHAR(100) NOT NULL,   -- 'order.created'
-    payload         JSONB        NOT NULL,   -- toàn bộ KafkaEvent<...> đã serialize
-    status          VARCHAR(20)  NOT NULL DEFAULT 'PENDING',  -- PENDING | SENT | FAILED
-    retry_count     INT          NOT NULL DEFAULT 0,
-    next_attempt_at TIMESTAMP    NOT NULL DEFAULT now(),
-    created_at      TIMESTAMP    NOT NULL DEFAULT now(),
-    sent_at         TIMESTAMP
-);
+`order-service` **chưa có** Redis. Thêm vào `pom.xml`:
 
-CREATE INDEX idx_outbox_pending
-    ON outbox_event (status, next_attempt_at)
-    WHERE status = 'PENDING';
+```xml
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-data-redis</artifactId>
+</dependency>
 ```
 
-### 4.2. Entity
+`application.properties`:
+
+```properties
+spring.data.redis.host=localhost
+spring.data.redis.port=6379
+```
+
+Spring Boot tự tạo bean `StringRedisTemplate` — không cần viết `@Configuration`.
+
+### 4.2. Hằng số dùng chung
+
+Tạo `com/ice/orderservice/Kafka/Idempotency.java`:
 
 ```java
-package com.ice.orderservice.Entity;
+package com.ice.orderservice.Kafka;
 
-import com.ice.orderservice.Enum.OutboxStatus;
-import jakarta.persistence.*;
-import lombok.*;
-import org.hibernate.annotations.JdbcTypeCode;
-import org.hibernate.type.SqlTypes;
+import java.time.Duration;
 
-import java.time.LocalDateTime;
-import java.util.UUID;
+public final class Idempotency {
+    private Idempotency() {}
 
-@Entity
-@Table(name = "outbox_event")
-@Getter @Setter
-@NoArgsConstructor @AllArgsConstructor @Builder
-public class OutboxEvent {
+    public static final String PROCESSED_KEY_PREFIX = "order-service:processed-event:";
+    public static final Duration PROCESSED_TTL = Duration.ofDays(7);
 
-    @Id
-    @GeneratedValue(strategy = GenerationType.UUID)
-    @Column(name = "id", nullable = false, updatable = false)
-    private UUID id;
-
-    @Column(name = "aggregate_type", length = 50, nullable = false)
-    private String aggregateType;
-
-    @Column(name = "aggregate_id", length = 64, nullable = false)
-    private String aggregateId;
-
-    @Column(name = "topic", length = 100, nullable = false)
-    private String topic;
-
-    @Column(name = "event_type", length = 100, nullable = false)
-    private String eventType;
-
-    @JdbcTypeCode(SqlTypes.JSON)
-    @Column(name = "payload", columnDefinition = "jsonb", nullable = false)
-    private String payload;   // JSON string của KafkaEvent<...>
-
-    @Enumerated(EnumType.STRING)
-    @Column(name = "status", length = 20, nullable = false)
-    @Builder.Default
-    private OutboxStatus status = OutboxStatus.PENDING;
-
-    @Column(name = "retry_count", nullable = false)
-    @Builder.Default
-    private Integer retryCount = 0;
-
-    @Column(name = "next_attempt_at", nullable = false)
-    private LocalDateTime nextAttemptAt;
-
-    @Column(name = "created_at", nullable = false, updatable = false)
-    private LocalDateTime createdAt;
-
-    @Column(name = "sent_at")
-    private LocalDateTime sentAt;
-
-    @PrePersist
-    void onCreate() {
-        LocalDateTime now = LocalDateTime.now();
-        if (createdAt == null) createdAt = now;
-        if (nextAttemptAt == null) nextAttemptAt = now;
+    public static String key(String eventId) {
+        return PROCESSED_KEY_PREFIX + eventId;
     }
 }
 ```
 
-```java
-package com.ice.orderservice.Enum;
+> TTL 7 ngày: đủ lâu để chặn mọi lần redeliver/replay hợp lý, mà Redis không phình mãi.
 
-public enum OutboxStatus { PENDING, SENT, FAILED }
-```
+### 4.3. Tách phần nghiệp vụ ra service riêng
 
-### 4.3. Repository
+`@Transactional` **không có tác dụng khi gọi method cùng class** (self-invocation bỏ qua
+proxy). Nên đưa toàn bộ thân xử lý hiện tại của `PaymentProcessedListener` sang một bean
+mới, listener chỉ còn lo Kafka + Redis + nuốt lỗi.
 
-```java
-package com.ice.orderservice.Repository;
-
-import com.ice.orderservice.Entity.OutboxEvent;
-import com.ice.orderservice.Enum.OutboxStatus;
-import org.springframework.data.domain.Pageable;
-import org.springframework.data.jpa.repository.JpaRepository;
-import org.springframework.data.jpa.repository.Query;
-import org.springframework.data.repository.query.Param;
-
-import java.time.LocalDateTime;
-import java.util.List;
-import java.util.UUID;
-
-public interface OutboxEventRepo extends JpaRepository<OutboxEvent, UUID> {
-
-    @Query("""
-           SELECT o FROM OutboxEvent o
-           WHERE o.status = :status
-             AND o.nextAttemptAt <= :now
-           ORDER BY o.createdAt ASC
-           """)
-    List<OutboxEvent> findBatchToSend(@Param("status") OutboxStatus status,
-                                      @Param("now") LocalDateTime now,
-                                      Pageable pageable);
-}
-```
-
-### 4.4. Service ghi outbox (thay cho `KafkaProducerService.send`)
+`com/ice/orderservice/Service/PaymentProcessedHandler.java`:
 
 ```java
 package com.ice.orderservice.Service;
 
+import com.ice.orderservice.Client.InventoryClient;
+import com.ice.orderservice.DTO.Event.Cosume.PaymentProcessedPayload;
 import com.ice.orderservice.DTO.Event.Publish.KafkaEvent;
-import com.ice.orderservice.Entity.OutboxEvent;
-import com.ice.orderservice.Repository.OutboxEventRepo;
+import com.ice.orderservice.DTO.Event.Publish.OrderCancelledPayload;
+import com.ice.orderservice.DTO.Request.Inventory.DeductRequest;
+import com.ice.orderservice.DTO.Request.Inventory.ReleaseRequest;
+import com.ice.orderservice.Entity.Order;
+import com.ice.orderservice.Entity.SagaState;
+import com.ice.orderservice.Enum.*;
+import com.ice.orderservice.Exception.ResourceNotFoundException;
+import com.ice.orderservice.Repository.OrderRepo;
+import com.ice.orderservice.Repository.SageStateRepo;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
-import tools.jackson.databind.ObjectMapper;
+import org.springframework.transaction.annotation.Transactional;
 
-import java.time.Instant;
 import java.util.UUID;
 
 @Service
+@Slf4j
 @RequiredArgsConstructor
-public class OutboxService {
+public class PaymentProcessedHandler {
 
-    private final OutboxEventRepo outboxEventRepo;
-    private final ObjectMapper objectMapper;
+    private final OrderRepo orderRepo;
+    private final SageStateRepo sageStateRepo;
+    private final InventoryClient inventoryClient;
+    private final KafkaProducerService kafkaProducerService;
+    private final OrderEventPayloadFactory payloadFactory;   // xem phần 6.4
 
-    /**
-     * Gọi hàm này BÊN TRONG @Transactional của nghiệp vụ (createOrder, listener...).
-     * Nó chỉ INSERT 1 dòng DB — cùng transaction với orders/saga_state.
-     */
-    public void publish(String topic, String aggregateId, Object payload) {
-        KafkaEvent<Object> event = new KafkaEvent<>(
-                UUID.randomUUID().toString(),
-                topic,
-                Instant.now().toString(),
-                "1.0",
-                payload
-        );
+    @Transactional
+    public void handle(KafkaEvent<PaymentProcessedPayload> event) {
+        PaymentProcessedPayload payload = event.getPayload();
+        UUID orderId = UUID.fromString(payload.getOrderId());
 
-        OutboxEvent row = OutboxEvent.builder()
-                .aggregateType("ORDER")
-                .aggregateId(aggregateId)
-                .topic(topic)
-                .eventType(topic)
-                .payload(objectMapper.writeValueAsString(event))
-                .build();
+        Order order = orderRepo.findById(orderId)
+                .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy order " + orderId));
+        SagaState saga = sageStateRepo.findByOrderId(orderId)
+                .orElseThrow(() -> new IllegalStateException("Không tìm thấy saga cho order " + orderId));
 
-        outboxEventRepo.save(row);
+        // Guard lớp DB (độc lập với Redis): saga đã đi qua bước này rồi -> bỏ.
+        if (order.getStatus() == OrderStatus.CONFIRMED || order.getStatus() == OrderStatus.CANCELLED
+                || saga.getCompletedSteps().contains("STOCK_DEDUCTED")
+                || saga.getCompletedSteps().contains("ORDER_CONFIRMED")) {
+            log.info("Order {} đã xử lý payment.processed rồi (status={}), bỏ qua",
+                    order.getId(), order.getStatus());
+            return;
+        }
+
+        if (payload.getStatus() == PaymentGatewayStatus.SUCCESS) {
+            saga.getCompletedSteps().add("PAYMENT_PROCESSED");
+            saga.setCurrentStep(CurrentStep.PAYMENT_PROCESSED);
+            order.setPaymentStatus(PaymentStatus.PAID);
+            order.setTransactionId(payload.getTransactionId());
+
+            inventoryClient.deduct(new DeductRequest(order.getId().toString()));
+
+            saga.getCompletedSteps().add("STOCK_DEDUCTED");
+            saga.getCompletedSteps().add("ORDER_CONFIRMED");
+            saga.setCurrentStep(CurrentStep.ORDER_CONFIRMED);
+            order.setStatus(OrderStatus.CONFIRMED);
+            saga.setSagaStatus(SagaStatus.COMPLETED);
+
+            orderRepo.save(order);
+            sageStateRepo.save(saga);
+
+            kafkaProducerService.publishOrderConfirmEvent(payloadFactory.buildConfirmPayload(order));
+        } else if (payload.getStatus() == PaymentGatewayStatus.FAILED) {
+            saga.setSagaStatus(SagaStatus.COMPENSATED);
+            inventoryClient.release(new ReleaseRequest(order.getId().toString(), ReasonRelease.PAYMENT_FAILED));
+            order.setStatus(OrderStatus.CANCELLED);
+
+            orderRepo.save(order);
+            sageStateRepo.save(saga);
+
+            kafkaProducerService.publishOrderCancelledEvent(
+                    payloadFactory.buildCancelledPayload(order, "PAYMENT_FAILED"));
+        }
     }
 }
 ```
 
-Sau đó trong `OrderService.createOrder()` **đổi**:
+> Đây gần như là copy nguyên thân method cũ, chỉ khác: dùng `payloadFactory` để dựng
+> payload (dùng lại được ở scheduler việc B) và guard mạnh hơn theo `completedSteps`.
+
+### 4.4. Listener mới — mỏng, có Redis + nuốt lỗi
+
+`PaymentProcessedListener.java` viết lại:
 
 ```java
-// CŨ:
-kafkaProducerService.publishOrderCreatedEvent(new OrderCreatedPayload(...));
-// MỚI:
-outboxService.publish("order.created", saveOrder.getId().toString(), new OrderCreatedPayload(...));
-```
+package com.ice.orderservice.Listener;
 
-Làm tương tự cho `order.confirmed`, `order.cancelled` trong `OrderService` và
-`PaymentProcessedListener`. Vì `outboxService.publish()` chỉ `save()` một entity, nó tự động
-nằm trong transaction đang mở của các method `@Transactional` đó.
-
-### 4.5. Tiến trình nền gửi Kafka
-
-```java
-package com.ice.orderservice.Scheduler;
-
-import com.ice.orderservice.Entity.OutboxEvent;
-import com.ice.orderservice.Enum.OutboxStatus;
-import com.ice.orderservice.Repository.OutboxEventRepo;
+import com.ice.orderservice.DTO.Event.Cosume.PaymentProcessedPayload;
+import com.ice.orderservice.DTO.Event.Publish.KafkaEvent;
+import com.ice.orderservice.Kafka.Idempotency;
+import com.ice.orderservice.Service.PaymentProcessedHandler;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.data.domain.PageRequest;
-import org.springframework.kafka.core.KafkaTemplate;
-import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Transactional;
-
-import java.time.LocalDateTime;
-import java.util.List;
+import tools.jackson.core.type.TypeReference;
+import tools.jackson.databind.ObjectMapper;
 
 @Component
 @Slf4j
 @RequiredArgsConstructor
-public class OutboxRelayScheduler {
+public class PaymentProcessedListener {
 
-    private static final int BATCH_SIZE = 100;
-    private static final int MAX_RETRY = 10;
+    private final ObjectMapper objectMapper;
+    private final StringRedisTemplate redisTemplate;
+    private final PaymentProcessedHandler handler;
 
-    private final OutboxEventRepo outboxEventRepo;
-    private final KafkaTemplate<String, Object> kafkaTemplate;
+    @KafkaListener(topics = "payment.processed", groupId = "order-service")
+    public void handlePaymentProcessed(String message) {
+        try {
+            KafkaEvent<PaymentProcessedPayload> event = objectMapper.readValue(
+                    message, new TypeReference<KafkaEvent<PaymentProcessedPayload>>() {});
 
-    @Scheduled(fixedDelay = 2000)   // 2 giây/lần
-    @Transactional
-    public void relay() {
-        List<OutboxEvent> batch = outboxEventRepo.findBatchToSend(
-                OutboxStatus.PENDING, LocalDateTime.now(), PageRequest.of(0, BATCH_SIZE));
+            String dedupKey = Idempotency.key(event.getEventId());
+            if (Boolean.TRUE.equals(redisTemplate.hasKey(dedupKey))) {
+                log.info("Event {} đã xử lý rồi -> bỏ qua (duplicate)", event.getEventId());
+                return;
+            }
 
-        for (OutboxEvent e : batch) {
+            handler.handle(event);   // @Transactional ở bean khác
+
+            // chỉ đánh dấu khi CHẮC CHẮN transaction trên đã commit xong
+            redisTemplate.opsForValue().set(dedupKey, "1", Idempotency.PROCESSED_TTL);
+
+        } catch (Exception ex) {
+            // hướng E: log to, KHÔNG ném lại -> Kafka commit offset, không retry vô hạn
+            log.error("[KAFKA-DROP] topic=payment.processed message={} -- bỏ qua message sau lỗi",
+                    message, ex);
+        }
+    }
+}
+```
+
+### 4.5. Các listener khác
+
+- `StockEventListener` (`stock.released`): đã idempotent sẵn theo `order.getStatus() ==
+  CANCELLED`. Chỉ cần thêm phần **nuốt lỗi** (việc E, phần 5). Có thể thêm Redis key theo
+  cùng mẫu nếu muốn chắc hơn — không bắt buộc vì nó chỉ đổi status, không gọi service ngoài.
+- `PaymentRefundListener`: nếu handler gọi service ngoài / không idempotent → áp **đúng mẫu
+  Redis key** như `PaymentProcessedListener`.
+
+---
+
+## 5. Việc 2 (E) — Log & nuốt lỗi trong listener
+
+### Ý tưởng
+
+Mọi `@KafkaListener` bọc thân xử lý trong `try/catch`. Vào `catch`:
+
+1. `log.error(...)` kèm **topic + toàn bộ chuỗi message + stacktrace**.
+2. **`return` bình thường** — KHÔNG `throw` lại.
+
+Listener return êm → container commit offset → message coi như "đã tiêu thụ" → **không
+retry, không nghẽn partition**.
+
+### Đánh đổi (phải hiểu rõ)
+
+- Message lỗi bị **BỎ HẲN** — không retry, không đẩy sang Dead Letter Topic. Bạn dựa vào:
+  - Log `[KAFKA-DROP]` đủ to để thấy và **replay tay** (gửi lại message từ log).
+  - **Việc B** (Saga Recovery Scheduler) dọn cái đơn bị kẹt hậu quả.
+  - **Việc D** (Redis idempotency) để lần replay tay không xử lý trùng.
+- Lỗi **tạm thời** (inventory-service chết 3 giây) cũng bị bỏ luôn. Nếu muốn giảm rủi ro
+  này: thêm **thử lại có giới hạn ngay trong method** (2–3 lần, nghỉ ngắn) rồi mới bỏ —
+  vẫn hữu hạn, vẫn không nghẽn. Xem `SafeConsumer.runWithRetry` bên dưới (tùy chọn).
+
+### 5.1. Helper dùng chung
+
+`com/ice/orderservice/Kafka/SafeConsumer.java`:
+
+```java
+package com.ice.orderservice.Kafka;
+
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Component;
+
+@Component
+@Slf4j
+public class SafeConsumer {
+
+    /**
+     * Chạy {@code body}. Nếu ném lỗi -> log ERROR đầy đủ rồi NUỐT (không ném lại)
+     * => Spring Kafka commit offset, không retry vô hạn, không nghẽn partition.
+     * Đánh đổi: message lỗi bị BỎ. Dựa vào log + SagaRecoveryScheduler để cứu.
+     */
+    public void run(String topic, String rawMessage, Runnable body) {
+        try {
+            body.run();
+        } catch (Exception ex) {
+            log.error("[KAFKA-DROP] topic={} message={} -- bỏ qua sau lỗi", topic, rawMessage, ex);
+        }
+    }
+
+    /** (Tùy chọn) thử lại tối đa {@code maxAttempts} lần, nghỉ {@code sleepMs} giữa các lần. */
+    public void runWithRetry(String topic, String rawMessage, int maxAttempts, long sleepMs, Runnable body) {
+        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
             try {
-                // .get() -> chờ broker xác nhận đã nhận (đồng bộ, chắc chắn)
-                kafkaTemplate.send(e.getTopic(), e.getAggregateId(), e.getPayload())
-                             .get();
-
-                e.setStatus(OutboxStatus.SENT);
-                e.setSentAt(LocalDateTime.now());
-
+                body.run();
+                return;
             } catch (Exception ex) {
-                int n = e.getRetryCount() + 1;
-                e.setRetryCount(n);
-                // backoff tăng dần: 2^n giây (tối đa ~ vài phút)
-                e.setNextAttemptAt(LocalDateTime.now().plusSeconds((long) Math.min(300, Math.pow(2, n))));
-                if (n >= MAX_RETRY) {
-                    e.setStatus(OutboxStatus.FAILED);
-                    log.error("Outbox event {} FAILED sau {} lần thử — cần xử lý tay", e.getId(), n, ex);
-                } else {
-                    log.warn("Gửi outbox event {} lỗi, thử lại lần {}", e.getId(), n, ex);
+                if (attempt == maxAttempts) {
+                    log.error("[KAFKA-DROP] topic={} message={} -- bỏ sau {} lần thử",
+                            topic, rawMessage, maxAttempts, ex);
+                    return;
+                }
+                log.warn("topic={} lỗi lần {}/{}, thử lại", topic, attempt, maxAttempts, ex);
+                try { Thread.sleep(sleepMs); } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    return;
                 }
             }
         }
@@ -477,71 +459,122 @@ public class OutboxRelayScheduler {
 }
 ```
 
-> **Lưu ý về payload:** ở đây ta gửi thẳng chuỗi JSON đã lưu trong `payload`. Vậy consumer
-> vẫn nhận đúng JSON như trước (vì `KafkaProducerService` cũ cũng gửi object rồi
-> `JsonSerializer` tự stringify). Nếu producer config của bạn đang set
-> `value-serializer=JsonSerializer`, gửi `String` sẽ bị bọc thêm dấu `"`. Cách an toàn:
-> tạo một `KafkaTemplate<String, String>` riêng với `StringSerializer` cho relay, hoặc
-> deserialize `payload` về `Object` rồi gửi. Kiểm tra bằng 1 message thật.
-
-### 4.6. Củng cố producer (rẻ mà lợi)
-
-Trong `application.properties`:
-
-```properties
-spring.kafka.producer.acks=all
-spring.kafka.producer.retries=5
-spring.kafka.producer.properties.enable.idempotence=true
-spring.kafka.producer.properties.max.in.flight.requests.per.connection=5
-```
-
-`acks=all` = chờ tất cả replica xác nhận mới coi là gửi thành công (không mất message khi
-1 broker chết). `enable.idempotence=true` = Kafka tự chống gửi trùng ở tầng network.
-
-### 4.7. Bật scheduling
-
-`order-service` chưa có. Thêm vào class `OrderServiceApplication` hoặc một `@Configuration`:
+### 5.2. Áp vào `StockEventListener`
 
 ```java
-@SpringBootApplication
-@EnableScheduling      // <-- thêm dòng này
-public class OrderServiceApplication { ... }
+@KafkaListener(topics = "stock.released", groupId = "order-service")
+public void handleStockRelease(String message) {
+    safeConsumer.run("stock.released", message, () -> stockReleaseHandler.handle(message));
+}
 ```
+
+Trong đó `stockReleaseHandler.handle(...)` là bean `@Service` chứa nguyên thân
+`@Transactional` hiện tại của `StockEventListener` (tách ra vì lý do proxy như phần 4.3).
+
+> `PaymentProcessedListener` ở phần 4.4 đã tự `try/catch` nuốt lỗi rồi nên không cần bọc
+> thêm `SafeConsumer`. Dùng cái nào cũng được, miễn **không để exception thoát ra khỏi
+> method listener**.
 
 ---
 
-## 5. Giải pháp 2 — Saga Recovery Scheduler
+## 6. Việc 3 (B) — Saga Recovery Scheduler
 
-Outbox lo việc "event đã quyết định gửi thì chắc chắn tới". Nhưng còn trường hợp **saga
-đứng im vì đang chờ một event từ ngoài không bao giờ tới** (payment-service chết) — cái này
-cần một vòng quét riêng.
+> Đây là phần **theo hướng của tôi, bạn chỉ việc làm theo**. Code bên dưới khớp với entity
+> / enum hiện có (`SagaState`, `SagaStatus`, `CurrentStep`, `OrderStatus`).
 
-### 5.1. Thêm query
+### Ý tưởng
+
+Một vòng lặp nền, mỗi phút 1 lần:
+
+1. Tìm các `saga_state` có `sagaStatus IN (STARTED, COMPENSATING)` và `updatedAt` cũ hơn
+   `STUCK_MINUTES` phút → coi là "kẹt".
+2. Với mỗi saga kẹt, nhìn `currentStep` để chọn hành động:
+   - Kẹt ở bước **chưa có gì không thể hoàn tác** (`ORDER_CREATED`, `STOCK_RESERVED`) →
+     **compensate**: huỷ đơn + publish `order.cancelled` (inventory nhả kho).
+   - Kẹt ở `PAYMENT_PROCESSED` → nghi **đã trừ tiền** → **KHÔNG tự huỷ**, set `FAILED` +
+     log `ERROR` để người đối soát.
+   - Đã tới `STOCK_DEDUCTED` / `ORDER_CONFIRMED` mà saga chưa đóng → nghiệp vụ xong rồi,
+     chỉ là event/status chưa chốt → **re-publish `order.confirmed`** + đóng saga `COMPLETED`.
+   - `sagaStatus == COMPENSATING` (đang bồi hoàn dở) → chạy lại compensate.
+3. Mỗi lần đụng vào một saga thì `retryCount++`. Quá `MAX_RETRY` → `FAILED` + log `ERROR`,
+   **thôi không tự sửa nữa**.
+
+> **Nguyên tắc:** chưa mất mát gì không hoàn tác được → compensate (an toàn nhất). Đã có
+> bước không hoàn tác (trừ tiền, trừ kho) → đẩy tiếp cho xong, không rollback. Bí quá →
+> `FAILED` cho người vào.
+
+### 6.1. Bật scheduling
+
+`OrderServiceApplication.java`:
 
 ```java
-// SageStateRepo.java
-@Query("""
-       SELECT s FROM SagaState s
-       WHERE s.sagaStatus IN :statuses
-         AND s.updatedAt < :threshold
-       """)
-List<SagaState> findStuck(@Param("statuses") List<SagaStatus> statuses,
-                          @Param("threshold") LocalDateTime threshold);
+package com.ice.orderservice;
+
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.scheduling.annotation.EnableScheduling;
+
+@SpringBootApplication
+@EnableScheduling   // <-- thêm
+public class OrderServiceApplication {
+    public static void main(String[] args) {
+        SpringApplication.run(OrderServiceApplication.class, args);
+    }
+}
 ```
 
-### 5.2. Scheduler
+### 6.2. Query tìm saga kẹt
+
+Thêm vào `SageStateRepo.java`:
+
+```java
+package com.ice.orderservice.Repository;
+
+import com.ice.orderservice.Entity.SagaState;
+import com.ice.orderservice.Enum.SagaStatus;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
+
+import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
+
+public interface SageStateRepo extends JpaRepository<SagaState, UUID> {
+
+    Optional<SagaState> findByOrderId(UUID orderId);
+
+    @Query("""
+           SELECT s FROM SagaState s
+           WHERE s.sagaStatus IN :statuses
+             AND s.updatedAt < :threshold
+           ORDER BY s.updatedAt ASC
+           """)
+    List<SagaState> findStuck(@Param("statuses") List<SagaStatus> statuses,
+                              @Param("threshold") LocalDateTime threshold,
+                              Pageable pageable);
+}
+```
+
+### 6.3. Scheduler
+
+`com/ice/orderservice/Scheduler/SagaRecoveryScheduler.java`:
 
 ```java
 package com.ice.orderservice.Scheduler;
 
 import com.ice.orderservice.Entity.Order;
 import com.ice.orderservice.Entity.SagaState;
-import com.ice.orderservice.Enum.*;
-import com.ice.orderservice.Repository.OrderRepo;
+import com.ice.orderservice.Enum.OrderStatus;
+import com.ice.orderservice.Enum.SagaStatus;
 import com.ice.orderservice.Repository.SageStateRepo;
-import com.ice.orderservice.Service.OutboxService;
+import com.ice.orderservice.Service.KafkaProducerService;
+import com.ice.orderservice.Service.OrderEventPayloadFactory;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -556,234 +589,238 @@ public class SagaRecoveryScheduler {
 
     private static final int STUCK_MINUTES = 10;   // saga không nhúc nhích 10 phút = nghi kẹt
     private static final int MAX_RETRY = 5;
+    private static final int BATCH_SIZE = 50;
 
     private final SageStateRepo sageStateRepo;
-    private final OrderRepo orderRepo;
-    private final OutboxService outboxService;
+    private final KafkaProducerService kafkaProducerService;
+    private final OrderEventPayloadFactory payloadFactory;
 
     @Scheduled(fixedDelay = 60_000)   // 1 phút/lần
     @Transactional
     public void recoverStuckSagas() {
         LocalDateTime threshold = LocalDateTime.now().minusMinutes(STUCK_MINUTES);
-        List<SagaState> stuck = sageStateRepo.findStuck(
-                List.of(SagaStatus.STARTED, SagaStatus.COMPENSATING), threshold);
+        List<SagaState> stuckList = sageStateRepo.findStuck(
+                List.of(SagaStatus.STARTED, SagaStatus.COMPENSATING),
+                threshold,
+                PageRequest.of(0, BATCH_SIZE));
 
-        for (SagaState saga : stuck) {
-            Order order = saga.getOrder();
+        for (SagaState saga : stuckList) {
+            try {
+                recoverOne(saga);
+            } catch (Exception ex) {
+                log.error("Recovery lỗi cho saga {} (order {})",
+                        saga.getId(), saga.getOrder().getId(), ex);
+            }
+        }
+    }
 
-            if (saga.getRetryCount() >= MAX_RETRY) {
+    private void recoverOne(SagaState saga) {
+        Order order = saga.getOrder();
+
+        if (saga.getRetryCount() >= MAX_RETRY) {
+            saga.setSagaStatus(SagaStatus.FAILED);
+            saga.setFailureReason("Recovery quá " + MAX_RETRY + " lần vẫn kẹt ở "
+                    + saga.getCurrentStep() + " / " + saga.getSagaStatus());
+            log.error("[SAGA-FAILED] order={} step={} -- cần xử lý tay",
+                    order.getId(), saga.getCurrentStep());
+            sageStateRepo.save(saga);
+            return;
+        }
+        saga.setRetryCount(saga.getRetryCount() + 1);
+
+        // Đang bồi hoàn dở -> chạy lại compensate, bất kể currentStep.
+        if (saga.getSagaStatus() == SagaStatus.COMPENSATING) {
+            compensate(order, saga, "RESUME_COMPENSATION");
+            sageStateRepo.save(saga);
+            return;
+        }
+
+        switch (saga.getCurrentStep()) {
+            case ORDER_CREATED, STOCK_RESERVED ->
+                    compensate(order, saga, "SAGA_TIMEOUT_" + saga.getCurrentStep());
+
+            case PAYMENT_PROCESSED -> {
+                // Tiền có thể đã bị trừ mà saga chưa hoàn tất -> KHÔNG tự huỷ, báo người.
                 saga.setSagaStatus(SagaStatus.FAILED);
-                saga.setFailureReason("Quá " + MAX_RETRY + " lần recovery vẫn kẹt ở " + saga.getCurrentStep());
-                log.error("SAGA FAILED order={} step={} — cần người xử lý tay",
-                          order.getId(), saga.getCurrentStep());
-                continue;
+                saga.setFailureReason("Kẹt ở PAYMENT_PROCESSED - nghi đã trừ tiền, cần đối soát payment-service");
+                log.error("[SAGA-FAILED] order={} kẹt sau khi payment xử lý -- cần đối soát tiền", order.getId());
             }
-            saga.setRetryCount(saga.getRetryCount() + 1);
 
-            switch (saga.getCurrentStep()) {
-
-                // Đã reserve kho, đang chờ payment.processed mà mãi không tới.
-                // An toàn nhất: huỷ đơn + nhả kho (compensate).
-                case STOCK_RESERVED -> {
-                    log.warn("Recovery: order {} kẹt ở STOCK_RESERVED, tiến hành huỷ + nhả kho", order.getId());
-                    order.setStatus(OrderStatus.CANCELLED);
-                    saga.setSagaStatus(SagaStatus.COMPENSATED);
-                    // publish để inventory nhả kho; consumer phải idempotent
-                    outboxService.publish("order.cancelled", order.getId().toString(),
-                            buildCancelledPayload(order, "SAGA_TIMEOUT"));
+            case STOCK_DEDUCTED, ORDER_CONFIRMED -> {
+                // Nghiệp vụ đã xong, chỉ event/status chưa chốt -> re-publish + đóng saga.
+                if (order.getStatus() != OrderStatus.CONFIRMED) {
+                    order.setStatus(OrderStatus.CONFIRMED);
                 }
-
-                // Đã confirm nhưng chưa chắc event order.confirmed đã ra.
-                // Với Outbox thì trường hợp này gần như không còn — nhưng vẫn re-publish cho chắc.
-                case ORDER_CONFIRMED -> {
-                    log.warn("Recovery: order {} CONFIRMED, re-publish order.confirmed", order.getId());
-                    outboxService.publish("order.confirmed", order.getId().toString(),
-                            buildConfirmPayload(order));
-                    saga.setSagaStatus(SagaStatus.COMPLETED);
-                }
-
-                default -> log.warn("Recovery: chưa có chiến lược cho step {} (order {})",
-                                    saga.getCurrentStep(), order.getId());
+                kafkaProducerService.publishOrderConfirmEvent(payloadFactory.buildConfirmPayload(order));
+                saga.setSagaStatus(SagaStatus.COMPLETED);
+                log.warn("Recovery: order {} re-publish order.confirmed, đóng saga COMPLETED", order.getId());
             }
         }
+        sageStateRepo.save(saga);
     }
 
-    // buildCancelledPayload / buildConfirmPayload: tách logic dựng payload dùng chung
-    // từ OrderService ra một helper để tái sử dụng ở đây.
-}
-```
-
-> **Nguyên tắc chọn hành động recovery:**
-> - Nếu chưa có gì "không thể hoàn tác" xảy ra (chưa trừ tiền, chưa trừ kho) → **compensate**
->   (huỷ đơn, nhả reserve). An toàn nhất.
-> - Nếu đã có bước không hoàn tác được (đã refund, đã trừ kho) → **đẩy tiếp** cho xong,
->   không được rollback.
-> - Quá `MAX_RETRY` → `FAILED` + log `ERROR` để con người vào xử lý. **Đừng cố tự sửa mãi.**
-
----
-
-## 6. Giải pháp 3 — Idempotency
-
-"Idempotent" = gọi 1 lần hay 10 lần **kết quả cuối giống nhau**. Bắt buộc phải có vì:
-Outbox có thể gửi trùng, Kafka giao at-least-once, recovery scheduler có thể re-publish.
-
-### 6.1. Phía `order-service` — guard theo saga step
-
-Trong `PaymentProcessedListener`, thay guard chỉ-check-status bằng check theo `completedSteps`:
-
-```java
-// Nếu saga đã đi qua bước này rồi -> message trùng -> bỏ qua, KHÔNG gọi lại inventory
-if (saga.getCompletedSteps().contains("STOCK_DEDUCTED")) {
-    log.info("Order {} đã STOCK_DEDUCTED rồi, bỏ qua payment.processed trùng", order.getId());
-    return;
-}
-```
-
-Và trước khi gọi `inventoryClient.deduct(...)`, chỉ gọi nếu chưa từng deduct.
-
-### 6.2. Phía `inventory-service` — làm `deduct/release/reserve` idempotent theo `orderId`
-
-Sửa `InventoryService.deductOrder()`:
-
-```java
-@Transactional
-public DeductResponse deductOrder(DeductRequest request) {
-    List<StockReservation> reserved =
-            stockReservationService.getAllByOrderIdWithStatusRESERVED(request.getOrderId());
-
-    if (reserved.isEmpty()) {
-        // Không còn dòng RESERVED. Có phải vì đã deduct trước đó rồi không?
-        List<StockReservation> deducted =
-                stockReservationService.getAllByOrderIdWithStatusDEDUCT(request.getOrderId());
-        if (!deducted.isEmpty()) {
-            // ĐÃ trừ kho cho order này rồi -> trả OK, KHÔNG trừ lần nữa
-            return new DeductResponse(true, request.getOrderId(), Instant.now());
-        }
-        throw new ResourceNotFoundException("no reserved stock found for orderId", ErrorCode.INVENTORY_NOT_FOUND);
+    private void compensate(Order order, SagaState saga, String reason) {
+        order.setStatus(OrderStatus.CANCELLED);
+        saga.setSagaStatus(SagaStatus.COMPENSATED);
+        kafkaProducerService.publishOrderCancelledEvent(
+                payloadFactory.buildCancelledPayload(order, reason));
+        log.warn("Recovery: order {} kẹt ở {} -> huỷ đơn + publish order.cancelled (reason={})",
+                order.getId(), saga.getCurrentStep(), reason);
     }
-    // ... phần trừ kho như cũ ...
 }
 ```
 
-Làm tương tự:
-- `releaseOrder()`: nếu không còn `RESERVED` nhưng đã có `RELEASED` cho orderId → trả OK.
-- `reserveOrder()`: nếu **đã tồn tại** reservation cho orderId (bất kể trạng thái) → trả về
-  `ReserveResponseSuccess` cũ, **không insert thêm** và **không cộng `reservedQty` lần nữa**.
+### 6.4. Helper dựng payload (dùng chung listener + scheduler)
 
-> Với `returnOrder()` cũng vậy: đã `RETURNED` rồi thì trả OK.
-
-### 6.3. (Tùy chọn) Bảng `processed_event` chống xử lý trùng ở consumer
-
-Cách tổng quát hơn: mỗi listener, trước khi xử lý, thử `INSERT` `eventId` vào bảng
-`processed_event (event_id PRIMARY KEY, processed_at)`. Nếu dính khóa trùng → đã xử lý rồi →
-`return`. `KafkaEvent` của bạn **đã có sẵn `eventId`** nên rất hợp.
-
----
-
-## 7. Giải pháp 4 — Kafka error handler + Dead Letter Topic
+`com/ice/orderservice/Service/OrderEventPayloadFactory.java` — tách logic dựng payload đang
+lặp trong `PaymentProcessedListener` / `StockEventListener` / `OrderService`:
 
 ```java
-package com.ice.orderservice.Config;
+package com.ice.orderservice.Service;
 
+import com.ice.orderservice.DTO.Event.Publish.OrderCancelledPayload;
+import com.ice.orderservice.DTO.Event.Publish.OrderConfirmPayload;
+import com.ice.orderservice.DTO.Event.Publish.OrderItemEvent;
+import com.ice.orderservice.DTO.Event.Publish.ShippingAddressEvent;
+import com.ice.orderservice.Entity.Order;
+import com.ice.orderservice.Entity.OrderShippingAddress;
+import com.ice.orderservice.Exception.ResourceNotFoundException;
+import com.ice.orderservice.Repository.OrderShippingAddressRepo;
 import lombok.RequiredArgsConstructor;
-import org.apache.kafka.clients.consumer.ConsumerRecord;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
-import org.springframework.kafka.core.KafkaTemplate;
-import org.springframework.kafka.listener.DeadLetterPublishingRecoverer;
-import org.springframework.kafka.listener.DefaultErrorHandler;
-import org.springframework.util.backoff.FixedBackOff;
+import org.springframework.stereotype.Service;
 
-@Configuration
+@Service
 @RequiredArgsConstructor
-public class KafkaErrorHandlerConfig {
+public class OrderEventPayloadFactory {
 
-    private final KafkaTemplate<String, Object> kafkaTemplate;
+    private final OrderShippingAddressRepo orderShippingAddressRepo;
 
-    @Bean
-    public DefaultErrorHandler errorHandler() {
-        // Sau khi retry mà vẫn lỗi -> đẩy sang topic "<tên-topic-gốc>.DLT"
-        DeadLetterPublishingRecoverer recoverer = new DeadLetterPublishingRecoverer(
-                kafkaTemplate,
-                (ConsumerRecord<?, ?> record, Exception ex) ->
-                        new org.apache.kafka.common.TopicPartition(record.topic() + ".DLT", record.partition()));
+    public OrderConfirmPayload buildConfirmPayload(Order order) {
+        OrderShippingAddress addr = orderShippingAddressRepo.findByOrderId(order.getId())
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        "Không tìm thấy địa chỉ giao hàng cho order " + order.getId()));
+        return new OrderConfirmPayload(
+                order.getId().toString(),
+                order.getOrderCode(),
+                order.getUserId().toString(),
+                new ShippingAddressEvent(
+                        addr.getFullName(), addr.getPhone(), addr.getProvince(),
+                        addr.getDistrict(), addr.getWard(), addr.getStreetDetail()),
+                order.getOrderItems().stream()
+                        .map(i -> new OrderItemEvent(i.getVariantId().toString(), i.getQty()))
+                        .toList());
+    }
 
-        // thử lại 3 lần, mỗi lần cách 2 giây; hết thì gọi recoverer ở trên
-        DefaultErrorHandler handler = new DefaultErrorHandler(recoverer, new FixedBackOff(2_000L, 3L));
-
-        // Lỗi kiểu này thì retry vô ích -> cho vào DLT luôn
-        handler.addNotRetryableExceptions(
-                com.ice.orderservice.Exception.ResourceNotFoundException.class,
-                IllegalArgumentException.class);
-
-        return handler;
+    public OrderCancelledPayload buildCancelledPayload(Order order, String reason) {
+        // VERIFY: tham số boolean thứ 3 của OrderCancelledPayload nghĩa là gì (refund?),
+        // code hiện tại luôn truyền false -> giữ nguyên.
+        return new OrderCancelledPayload(
+                order.getId().toString(),
+                reason,
+                false,
+                order.getOrderItems().stream()
+                        .map(i -> new OrderItemEvent(i.getVariantId().toString(), i.getQty()))
+                        .toList());
     }
 }
 ```
 
-Spring Boot sẽ tự gắn bean `DefaultErrorHandler` này vào listener container mặc định. Sau đó
-tạo sẵn các topic `payment.processed.DLT`, `stock.released.DLT`... (hoặc để Kafka auto-create).
-Định kỳ xem DLT để biết message nào chết.
+### 6.5. Phụ thuộc cần biết
+
+- Scheduler **re-publish** `order.cancelled` / `order.confirmed`. Consumer bên
+  `inventory-service` / `shipping-service` phải **idempotent theo `orderId`** (gọi lại
+  `release` / tạo lại đơn giao thì trả OK thay vì lỗi). Việc đó nằm ở service kia —
+  không thuộc phạm vi order-service lần này, nhưng phải nhớ.
+- `@Scheduled` + `@Transactional` + query lại từ đầu mỗi lần chạy ⇒ tự an toàn với crash.
+- Đang chạy **1 instance** order-service. Nếu sau này ≥ 2 instance, `findStuck` cần
+  `SELECT ... FOR UPDATE SKIP LOCKED` để 2 instance không cùng cứu một saga.
 
 ---
 
-## 8. Thứ tự triển khai & checklist
+## 7. Thứ tự triển khai & checklist
 
-Làm từ trên xuống, mỗi bước test xong mới sang bước sau:
+Làm từ trên xuống, mỗi bước test xong mới sang bước sau.
 
-### Bước 1 — Outbox *(diệt lỗ hổng A, đỡ phần lớn C)*
-- [ ] Thêm enum `OutboxStatus`, entity `OutboxEvent`, repo `OutboxEventRepo`
-- [ ] Tạo bảng `outbox_event` (ddl-auto hoặc SQL tay)
-- [ ] Viết `OutboxService.publish(...)`
-- [ ] Thay mọi `kafkaProducerService.publishXxx(...)` trong `OrderService` +
-      `PaymentProcessedListener` bằng `outboxService.publish(...)`
-- [ ] Viết `OutboxRelayScheduler`
+### Bước 1 — Idempotency bằng Redis (việc D) — ✅ ĐÃ LÀM
+
+Cách đã làm (hơi khác kế hoạch ban đầu, vẫn ổn):
+- [x] Thêm `spring-boot-starter-data-redis` + `spring.data.redis.*`
+- [x] `Service/IdempotencyService.java` — `isProcessed(eventId)` / `markProcessed(eventId)`
+      (key `processed:event:<eventId>`, TTL 24h)
+- [x] Mỗi listener: `if (idempotencyService.isProcessed(eventId)) return;` đầu handler,
+      `idempotencyService.markProcessed(eventId)` ở cuối
+- [ ] **Test:** gửi lại tay 1 message cũ (cùng `eventId`) → bỏ qua, không xử lý lần 2;
+      `eventId` mới → xử lý bình thường
+- ⚠️ Còn nợ: `markProcessed` đang chạy **trong** transaction, trước khi commit. Nếu commit
+      fail sau đó thì Redis đã đánh dấu nhưng DB chưa lưu. Với việc E (nuốt lỗi) thì message
+      bị bỏ luôn → đơn kẹt, chờ **việc B** dọn. Chấp nhận ở scope học; muốn chặt thì chuyển
+      `markProcessed` ra listener, gọi **sau khi** `handler.handle(...)` return.
+
+### Bước 2 — Log & nuốt lỗi (việc E) — ✅ ĐÃ LÀM
+
+- [x] `Kafka/SafeConsumer.java` — `run(topic, message, Runnable)`: chạy body, lỗi thì
+      `log.error("[KAFKA-DROP] ...")` rồi **nuốt** (không ném lại)
+- [x] Tách thân `@Transactional` của cả 3 listener ra bean `@Service` riêng:
+      `PaymentProcessedHandler`, `StockReleaseHandler`, `PaymentRefundHandler`
+      *(bắt buộc: nếu try/catch nằm trong chính method `@Transactional` thì nuốt lỗi =
+      Spring commit dữ liệu ghi dở thay vì rollback)*
+- [x] 3 listener giờ chỉ còn 1 dòng: `safeConsumer.run("<topic>", message, () -> handler.handle(message))`
+- [x] `./mvnw compile` — BUILD SUCCESS
+- [ ] **Test:** đẩy 1 message JSON rác vào `stock.released` → log `[KAFKA-DROP]`, listener
+      **vẫn xử lý được message hợp lệ tiếp theo** (partition không nghẽn); đẩy message hợp lệ
+      nhưng ép `inventory` lỗi → thấy `[KAFKA-DROP]`, DB order **không** đổi (đã rollback)
+
+### Bước 3 — Saga Recovery Scheduler (việc B)
 - [ ] `@EnableScheduling` trên `OrderServiceApplication`
-- [ ] Thêm `acks=all`, `enable.idempotence=true` vào `application.properties`
-- [ ] **Test:** đặt 1 đơn COD, xem bảng `outbox_event` có dòng `PENDING` → sau ~2s thành
-      `SENT`; consumer vẫn nhận đúng. Thử tắt Kafka → dòng vẫn `PENDING`, bật lại → tự gửi.
-
-### Bước 2 — Idempotency *(diệt lỗ hổng D)*
-- [ ] Guard listener theo `completedSteps`
-- [ ] `deductOrder` / `releaseOrder` / `reserveOrder` / `returnOrder` idempotent theo `orderId`
-- [ ] **Test:** gửi lại tay 1 message `payment.processed` cũ → không trừ kho lần 2, không lỗi
-
-### Bước 3 — Saga recovery *(diệt lỗ hổng B)*
 - [ ] `SageStateRepo.findStuck(...)`
+- [ ] `OrderEventPayloadFactory` + sửa listener dùng lại factory (bỏ code lặp)
 - [ ] `SagaRecoveryScheduler`
-- [ ] Tách helper dựng payload dùng chung
 - [ ] **Test:** tạo đơn online, cố tình không cho payment-service phản hồi → sau
-      `STUCK_MINUTES`, scheduler huỷ đơn + nhả kho; sau `MAX_RETRY` lần thì saga = `FAILED`
-
-### Bước 4 — Kafka error handler + DLT *(lỗ hổng E)*
-- [ ] `KafkaErrorHandlerConfig`
-- [ ] **Test:** gửi 1 message JSON rác vào `payment.processed` → sau 3 lần retry nó nằm ở
-      `payment.processed.DLT`, listener vẫn xử lý được message tiếp theo
-
-### Bước 5 *(làm sau, refactor lớn)* — đưa REST call ra khỏi `@Transactional` của `createOrder`
-- [ ] `createOrder` chỉ lưu order `PENDING` + outbox `order.created` rồi return
-- [ ] Reserve / createPayment chuyển sang xử lý ở listener của `order.created` hoặc bước riêng
-- [ ] Job đối soát payment "mồ côi"
+      `STUCK_MINUTES` phút scheduler huỷ đơn + publish `order.cancelled`; ép lỗi liên tục
+      → sau `MAX_RETRY` lần thì saga = `FAILED` + log `[SAGA-FAILED]`
 
 ---
 
-## 9. Những thứ được phép bỏ qua
+## 8. Chưa làm lần này
 
-Ở scope project học, **không cần**:
+Ghi lại để làm sau, **không thuộc phạm vi đợt này**:
 
-- **Kafka exactly-once / transactional producer** (`KafkaTransactionManager`): phức tạp,
-  Outbox + idempotency đã đủ tốt.
-- **Crash ngay giữa lúc scheduler đang chạy**: scheduler `@Transactional` + query lại từ đầu
-  mỗi lần chạy nên tự nó đã an toàn với crash.
-- **Distributed transaction / 2PC**: không ai làm thế với microservice nữa.
-- **Chạy nhiều instance `order-service` cùng lúc**: nếu sau này chạy ≥2 instance thì
-  `OutboxRelayScheduler` cần `SELECT ... FOR UPDATE SKIP LOCKED` để 2 instance không gửi
-  trùng. Một instance thì chưa cần lo.
+### A — Mất event do dual-write → **Transactional Outbox**
+Cách sửa gốc rễ của [phần 2](#2-vấn-đề-gốc-dual-write-problem): trong `createOrder()` /
+listener, thay `kafkaProducerService.publishXxx(...)` bằng "ghi 1 dòng `outbox_event`"
+(cùng transaction với `orders` / `saga_state`); một `@Scheduled` đọc dòng `PENDING` → gửi
+Kafka (`.get()` chờ broker xác nhận) → đánh dấu `SENT`. Kèm `spring.kafka.producer.acks=all`
++ `enable.idempotence=true`.
+→ Tạm thời **việc B** gánh đỡ: đơn kẹt do mất event sẽ bị scheduler phát hiện và cứu, chỉ
+là chậm (tối đa `STUCK_MINUTES` phút) thay vì tức thì.
+
+### C — REST call trong `@Transactional` của `createOrder`
+`inventoryClient.reserve()` / `paymentClient.createPayment()` gây side effect ở service
+khác **ngay**, trong khi transaction DB của `order-service` chưa commit. Nếu commit fail →
+kho đã reserve + payment đã tạo nhưng **order không tồn tại**.
+→ Chuẩn: **đưa REST call ra khỏi `@Transactional`** — commit order `PENDING` trước, rồi gọi
+inventory/payment ở bước sau (đúng tinh thần Saga từng bước). Refactor lớn, làm sau khi đã
+có Outbox + Saga recovery. Trước mắt: thêm job đối soát payment "mồ côi".
+
+### Dead Letter Topic (DLT) cho Kafka
+Thay vì "nuốt lỗi" (việc E), cách bài bản hơn là `DefaultErrorHandler` +
+`DeadLetterPublishingRecoverer`: retry N lần rồi đẩy message hỏng sang `<topic>.DLT` và đi
+tiếp. Ưu điểm: **không mất message**. Nhược: phải dựng + theo dõi các topic `.DLT`. Cân
+nhắc nâng cấp việc E lên DLT khi có thời gian.
+
+### Những thứ vẫn được phép bỏ qua ở scope học
+- **Kafka exactly-once / transactional producer**: Outbox + idempotency đã đủ.
+- **Distributed transaction / 2PC**: không ai làm với microservice nữa.
+- **Chạy nhiều instance `order-service`**: khi nào ≥ 2 instance thì mới cần
+  `FOR UPDATE SKIP LOCKED` trong scheduler.
 
 ---
 
-## Tóm tắt 1 dòng
+## 9. Tóm tắt 1 dòng
 
-> Nguồn gốc mọi rắc rối là **ghi DB và gửi Kafka không cùng transaction**. Sửa bằng
-> **Outbox** (gửi Kafka biến thành ghi DB), **Saga recovery scheduler** (quét đơn kẹt),
-> **Idempotency** (xử lý trùng không sao), **DLT** (message chết không làm nghẽn).
+> Nguồn gốc rắc rối là **ghi DB và gửi Kafka không cùng transaction**. Đợt này chưa sửa gốc
+> (Outbox — [phần 8](#8-chưa-làm-lần-này)) mà xử lý hậu quả sau crash: **Redis idempotency**
+> (xử lý trùng không sao — [D](#4-việc-1-d--idempotency-bằng-redis-key)), **log & nuốt lỗi**
+> (message hỏng không nghẽn partition — [E](#5-việc-2-e--log--nuốt-lỗi-trong-listener)),
+> **Saga Recovery Scheduler** (quét đơn kẹt, tự huỷ / đẩy tiếp / báo người —
+> [B](#6-việc-3-b--saga-recovery-scheduler)). Ba cái bọc cho nhau.
