@@ -108,13 +108,10 @@ Order Service gọi khi đơn hàng đã tạo thành công — trừ lượt s�
 
 **Response 200**
 ```json
-{
-  "success": true,
-  "data": {
-    "code":            "SALE10",
-    "remainingGlobal": 149,
-    "userUsageCount":  1
-  }
+{ 
+  "code":            "SALE10",
+  "remainingGlobal": 149,
+  "userUsageCount":  1
 }
 ```
 
@@ -135,12 +132,6 @@ Order Service gọi khi đơn bị hủy — hoàn lại lượt coupon (compens
 ```
 
 **Response 200**
-```json
-{
-  "success": true,
-  "message": "Đã hoàn lại lượt sử dụng coupon."
-}
-```
 
 ---
 

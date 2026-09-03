@@ -1,9 +1,14 @@
 package com.ice.promotionservice.Service;
 
+import com.ice.promotionservice.DTO.Request.Coupon.CouponApplyRequest;
+import com.ice.promotionservice.DTO.Request.Coupon.CouponRollbackRequest;
 import com.ice.promotionservice.DTO.Request.Coupon.ValidationCouponItemRequest;
 import com.ice.promotionservice.DTO.Request.Coupon.ValidationCouponRequest;
+import com.ice.promotionservice.DTO.Response.Coupon.CouponApplyResponse;
+import com.ice.promotionservice.DTO.Response.Coupon.CouponUserResponse;
 import com.ice.promotionservice.DTO.Response.Coupon.ValidationCouponResponse;
 import com.ice.promotionservice.Entity.Coupon;
+import com.ice.promotionservice.Entity.CouponUsage;
 import com.ice.promotionservice.Enum.CouponApplicableType;
 import com.ice.promotionservice.Enum.CouponDiscountType;
 import com.ice.promotionservice.Enum.CouponInvalidReason;
@@ -13,8 +18,10 @@ import com.ice.promotionservice.Repository.CouponRepo;
 import com.ice.promotionservice.Repository.CouponUsageRepo;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.UUID;
 
@@ -24,7 +31,7 @@ public class PromotionService {
 
     private final CouponRepo couponRepo;
     private final CouponUsageRepo couponUsageRepo;
-    private final CouponUsageCounter couponUsageCounter;
+    private final CouponCounterService couponCounterService;
 
     public ValidationCouponResponse validationCoupon(ValidationCouponRequest request) {
 
@@ -40,7 +47,7 @@ public class PromotionService {
         if(now.isBefore(coupon.getStartsAt()))
             throw new CouponInvalidException(CouponInvalidReason.NOT_STARTED);
 
-        Long remaining = couponUsageCounter.getRemaining(coupon.getCode());
+        Long remaining = couponCounterService.getUsageRemaining(coupon.getCode());
         boolean soldOut = (remaining != null)
                 ? remaining <= 0
                 : coupon.getUsedCount() >= coupon.getUsageLimit();
@@ -48,9 +55,11 @@ public class PromotionService {
         if (soldOut)
             throw new CouponInvalidException(CouponInvalidReason.USAGE_LIMIT_REACHED);
 
-        int usedByUser = couponUsageRepo.countByUserIdAndCouponIdAndStatus(UUID.fromString(request.getUserId()), coupon.getId(), CouponUsageStatus.APPLIED);
-
-        if(usedByUser >= coupon.getUserLimit())
+        Long usedByUser = couponCounterService.getUserHadUsed(code, request.getUserId());
+        int usedUser = usedByUser == null
+                ? couponUsageRepo.countByUserIdAndCouponIdAndStatus(UUID.fromString(request.getUserId()), coupon.getId(), CouponUsageStatus.APPLIED)
+                : usedByUser.intValue();
+        if(usedUser >= coupon.getUserLimit())
             throw new CouponInvalidException(CouponInvalidReason.USER_LIMIT_REACHED);
 
         if(request.getOrderTotal() < coupon.getMinOrder())
@@ -106,5 +115,105 @@ public class PromotionService {
             case FIXED_AMOUNT -> Math.min(coupon.getDiscountValue(), orderTotal);
             case FREESHIP -> 0L;
         };
+    }
+
+    public List<CouponUserResponse> getCouponForUser(String userId) {
+        LocalDateTime now = LocalDateTime.now();
+        List<Coupon> coupons = couponRepo.findAllByIsActiveTrueAndStartsAtBeforeAndEndsAtAfter(now, now);
+
+        return coupons.stream()
+                .map(coupon -> new CouponUserResponse(
+                        coupon.getCode(),
+                        coupon.getTitle(),
+                        coupon.getDiscountType().name(),
+                        coupon.getDiscountValue(),
+                        coupon.getMaxDiscount(),
+                        coupon.getMinOrder(),
+                        coupon.getEndsAt().atZone(ZoneId.systemDefault()).toInstant(),
+                        canUse(coupon, userId)
+                )).toList();
+    }
+
+    @Transactional
+    public CouponApplyResponse apply(CouponApplyRequest request) {
+        String code = request.getCode().trim().toUpperCase();
+
+        var existing = couponUsageRepo.findByCouponCodeAndOrderId(code, UUID.fromString(request.getOrderId()));
+        if(existing.isPresent())
+            return new CouponApplyResponse(
+                    code,
+                    couponCounterService.getUsageRemaining(code),
+                    couponCounterService.getUserHadUsed(code, request.getUserId())
+            );
+        Coupon coupon = couponRepo.findByCode(code)
+                .filter(Coupon::getIsActive)
+                .orElseThrow(() -> new CouponInvalidException(CouponInvalidReason.NOT_FOUND));
+
+        Long remaining = couponCounterService.decrementUsage(code);
+        if(remaining<0)
+        {
+            couponCounterService.incrementUsage(code);
+            throw new CouponInvalidException(CouponInvalidReason.USAGE_LIMIT_REACHED);
+        }
+
+        Long userCount = couponCounterService.incrementUser(code, request.getUserId());
+        coupon.setUsedCount(coupon.getUsageLimit() - remaining.intValue());
+        couponRepo.save(coupon);
+
+        CouponUsage couponUsage = CouponUsage.builder()
+                .coupon(coupon)
+                .couponCode(code)
+                .userId(UUID.fromString(request.getUserId()))
+                .orderId(UUID.fromString(request.getOrderId()))
+                .status(CouponUsageStatus.APPLIED)
+                .build();
+        couponUsageRepo.save(couponUsage);
+
+        return new CouponApplyResponse(
+                code,
+                remaining,
+                userCount
+        );
+    }
+
+    @Transactional
+    public void rollback(CouponRollbackRequest request) {
+        String code = request.getCode().trim().toUpperCase();
+
+        CouponUsage couponUsage = couponUsageRepo
+                .findByCouponCodeAndOrderId(code, UUID.fromString(request.getOrderId()))
+                .orElse(null);
+
+        // Không tìm thấy bản ghi, hoặc đã rollback rồi -> không có gì để hoàn, coi như thành công
+        if (couponUsage == null || couponUsage.getStatus() != CouponUsageStatus.APPLIED)
+            return;
+
+        Coupon coupon = couponRepo.findByCode(code)
+                .orElseThrow(() -> new CouponInvalidException(CouponInvalidReason.NOT_FOUND));
+
+        Long remaining = couponCounterService.incrementUsage(code);
+        Long userCount = couponCounterService.decrementUser(code, request.getUserId());
+        coupon.setUsedCount(coupon.getUsageLimit() - remaining.intValue());
+        couponRepo.save(coupon);
+
+        couponUsage.setStatus(CouponUsageStatus.ROLLED_BACK);
+        couponUsageRepo.save(couponUsage);
+    }
+
+    private boolean canUse(Coupon coupon, String userId)
+    {
+        Long remaining = couponCounterService.getUsageRemaining(coupon.getCode());
+        boolean hasGlobalQuota = (remaining != null)
+                ? remaining > 0
+                : coupon.getUsedCount() < coupon.getUsageLimit();
+        if (!hasGlobalQuota)
+            return false;
+
+        Long userUsed = couponCounterService.getUserHadUsed(coupon.getCode(), userId);
+        int used = (userUsed != null)
+                ? userUsed.intValue()
+                : couponUsageRepo.countByUserIdAndCouponIdAndStatus(
+                UUID.fromString(userId), coupon.getId(), CouponUsageStatus.APPLIED);
+        return used < coupon.getUserLimit();
     }
 }
