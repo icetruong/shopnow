@@ -1,9 +1,7 @@
 package com.ice.promotionservice.Service;
 
-import com.ice.promotionservice.DTO.Request.Coupon.CouponApplyRequest;
-import com.ice.promotionservice.DTO.Request.Coupon.CouponRollbackRequest;
-import com.ice.promotionservice.DTO.Request.Coupon.ValidationCouponItemRequest;
-import com.ice.promotionservice.DTO.Request.Coupon.ValidationCouponRequest;
+import com.ice.promotionservice.DTO.Request.Coupon.*;
+import com.ice.promotionservice.DTO.Response.Coupon.AdminCreateResponse;
 import com.ice.promotionservice.DTO.Response.Coupon.CouponApplyResponse;
 import com.ice.promotionservice.DTO.Response.Coupon.CouponUserResponse;
 import com.ice.promotionservice.DTO.Response.Coupon.ValidationCouponResponse;
@@ -11,11 +9,14 @@ import com.ice.promotionservice.Entity.Coupon;
 import com.ice.promotionservice.Entity.CouponUsage;
 import com.ice.promotionservice.Enum.CouponApplicableType;
 import com.ice.promotionservice.Enum.CouponDiscountType;
+import com.ice.promotionservice.Enum.CouponAdminError;
 import com.ice.promotionservice.Enum.CouponInvalidReason;
 import com.ice.promotionservice.Enum.CouponUsageStatus;
+import com.ice.promotionservice.Exception.CouponAdminException;
 import com.ice.promotionservice.Exception.CouponInvalidException;
 import com.ice.promotionservice.Repository.CouponRepo;
 import com.ice.promotionservice.Repository.CouponUsageRepo;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -156,7 +157,7 @@ public class PromotionService {
             throw new CouponInvalidException(CouponInvalidReason.USAGE_LIMIT_REACHED);
         }
 
-        Long userCount = couponCounterService.incrementUser(code, request.getUserId());
+        Long userCount = couponCounterService.incrementUser(code, request.getUserId(), coupon.getEndsAt());
         coupon.setUsedCount(coupon.getUsageLimit() - remaining.intValue());
         couponRepo.save(coupon);
 
@@ -215,5 +216,54 @@ public class PromotionService {
                 : couponUsageRepo.countByUserIdAndCouponIdAndStatus(
                 UUID.fromString(userId), coupon.getId(), CouponUsageStatus.APPLIED);
         return used < coupon.getUserLimit();
+    }
+
+    public AdminCreateResponse createCoupon(AdminCreateRequest request) {
+        String code = request.getCode().trim().toUpperCase();
+
+        // 1. Trùng code (code là UNIQUE)
+        if (couponRepo.findByCode(code).isPresent())
+            throw new CouponAdminException(CouponAdminError.CODE_DUPLICATED);
+
+        // 2. Khoảng thời gian hợp lệ
+        LocalDateTime startsAt = request.getStartsAt().atZone(ZoneId.systemDefault()).toLocalDateTime();
+        LocalDateTime endsAt = request.getEndsAt().atZone(ZoneId.systemDefault()).toLocalDateTime();
+        if (!endsAt.isAfter(startsAt) || !endsAt.isAfter(LocalDateTime.now()))
+            throw new CouponAdminException(CouponAdminError.TIME_RANGE_INVALID);
+
+        // 3. discountValue theo loại giảm giá
+        if (request.getDiscountType() == CouponDiscountType.PERCENTAGE
+                && (request.getDiscountValue() < 1 || request.getDiscountValue() > 100))
+            throw new CouponAdminException(CouponAdminError.DISCOUNT_VALUE_INVALID);
+
+        // 4. applicableIds bắt buộc khi giới hạn theo CATEGORY/PRODUCT
+        if (request.getApplicableType() != CouponApplicableType.ALL
+                && (request.getApplicableIds() == null || request.getApplicableIds().isEmpty()))
+            throw new CouponAdminException(CouponAdminError.APPLICABLE_IDS_REQUIRED);
+
+        // 5. Lưu DB trước
+        Coupon coupon = Coupon.builder()
+                .code(code)
+                .title(request.getTitle())
+                .discountType(request.getDiscountType())
+                .discountValue(request.getDiscountValue())
+                .maxDiscount(request.getMaxDiscount())
+                .minOrder(request.getMinOrder())
+                .usageLimit(request.getUsageLimit())
+                .userLimit(request.getUserLimit())
+                .applicableType(request.getApplicableType())
+                .applicableIds(request.getApplicableIds())
+                .startsAt(startsAt)
+                .endsAt(endsAt)
+                .build();
+        couponRepo.save(coupon);
+
+        // 6. Seed Redis counter SAU khi DB ok
+        couponCounterService.createUsageRemaining(coupon.getUsageLimit().longValue(), code, endsAt);
+
+        return new AdminCreateResponse(
+                coupon.getId().toString(),
+                coupon.getCode()
+        );
     }
 }

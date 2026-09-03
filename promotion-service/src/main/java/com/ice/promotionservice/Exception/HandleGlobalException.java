@@ -43,4 +43,10 @@ public class HandleGlobalException {
         return ResponseEntity.badRequest()
                 .body(ApiResponse.fail(ex.getMessage(), ex.getCouponInvalidReason().name()));
     }
+
+    @ExceptionHandler(CouponAdminException.class)
+    public ResponseEntity<ApiResponse<Void>> handleCouponAdmin(CouponAdminException ex) {
+        return ResponseEntity.status(ex.getError().getStatus())
+                .body(ApiResponse.fail(ex.getMessage(), ex.getError().name()));
+    }
 }

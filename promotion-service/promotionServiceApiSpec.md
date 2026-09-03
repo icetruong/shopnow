@@ -204,6 +204,7 @@ Tạo mã giảm giá.
 ```json
 {
   "success": true,
+  "message": "Tạo mã giảm giá thành công",
   "data": { "couponId": "coupon-uuid-1", "code": "SALE10" }
 }
 ```
@@ -213,13 +214,208 @@ Tạo mã giảm giá.
 ---
 
 ### PUT /admin/coupons/{couponId}
-Cập nhật coupon.
+Cập nhật coupon. Partial update — gửi field nào cập nhật field đó. `code` **không đổi được** vì Redis key gắn theo code.
+
+**Header:** `Authorization: Bearer {accessToken}` — role `ADMIN`
+
+**Request Body** 
+```json
+{
+  "title":          "Giảm 10% tối đa 70k",
+  "discountType":   "PERCENTAGE",
+  "discountValue":  10,
+  "maxDiscount":    70000,
+  "minOrder":       200000,
+  "usageLimit":     200,
+  "userLimit":      1,
+  "startsAt":       "2024-01-15T00:00:00Z",
+  "endsAt":         "2024-02-15T23:59:59Z",
+  "applicableType": "CATEGORY",
+  "applicableIds":  ["cat-uuid-1", "cat-uuid-2"],
+  "isActive":       true
+}
+```
+
+**Response 200**
+```json
+{
+  "success": true,
+  "message": "Cập nhật coupon thành công",
+  "data": {
+    "couponId":   "coupon-uuid-1",
+    "code":       "SALE10",
+    "usageLimit": 200,
+    "usedCount":  37,
+    "remaining":  163,
+    "updatedAt":  "2024-01-20T09:30:00Z"
+  }
+}
+```
+
+**Response 404**
+```json
+{ "success": false, "code": "COUPON_NOT_FOUND", "message": "Không tìm thấy coupon." }
+```
+
+**Response 400** — kèm lý do cụ thể
+```json
+{ "success": false, "code": "COUPON_UPDATE_INVALID", "message": "usageLimit không được nhỏ hơn số lượt đã dùng (37)." }
+```
+
+**reason values:**
+```
+CODE_IMMUTABLE          — body gửi "code" khác code hiện tại
+USAGE_LIMIT_BELOW_USED  — usageLimit mới < usedCount
+TIME_RANGE_INVALID      — endsAt <= startsAt
+DISCOUNT_VALUE_INVALID  — PERCENTAGE mà value ngoài 1..100, hoặc value <= 0
+APPLICABLE_IDS_REQUIRED — applicableType = CATEGORY/PRODUCT nhưng applicableIds rỗng
+```
+
+**Flow bên trong:**
+```
+1. Tìm coupon theo couponId → 404 COUPON_NOT_FOUND nếu không có
+2. Nếu body có "code" khác code hiện tại → 400 CODE_IMMUTABLE
+3. Validate field gửi lên (time range, discountValue, applicableIds…)
+4. Nếu có usageLimit mới:
+   a. usageLimit mới < usedCount → 400 USAGE_LIMIT_BELOW_USED
+   b. delta = usageLimit mới - usageLimit cũ
+   c. INCRBY coupon:usage:{code} delta   (nới/thu lượt CÒN LẠI đúng phần chênh, KHÔNG SET đè)
+5. Nếu có endsAt mới → EXPIRE coupon:usage:{code} theo (endsAt mới - now) giây
+6. UPDATE các cột vào DB, set updated_at = now
+7. Trả coupon sau cập nhật (remaining đọc lại từ Redis)
+```
+
+**Side effect (Redis):**
+- Đổi `usageLimit` → `INCRBY coupon:usage:{code}` theo `delta` (set đè sẽ làm mất phần đã trừ).
+- Đổi `endsAt` → cập nhật TTL của `coupon:usage:{code}`.
+- Đổi `isActive = false` → xử lý như `DELETE` (xem dưới).
+
+> **Ghi chú schema:** bảng `coupons` hiện chỉ có `created_at`. Endpoint này cần bổ sung cột `updated_at TIMESTAMP` để trả `updatedAt`.
+
+---
 
 ### DELETE /admin/coupons/{couponId}
-Vô hiệu hóa coupon.
+Vô hiệu hóa coupon — **soft delete** (set `is_active = false`), KHÔNG xóa cứng để giữ lịch sử trong `coupon_usages`.
+
+**Header:** `Authorization: Bearer {accessToken}` — role `ADMIN`
+
+**Path param:** `couponId` — UUID coupon
+
+**Response 200**
+```json
+{
+  "success": true,
+  "message": "Đã vô hiệu hóa coupon SALE10."
+}
+```
+
+**Response 404**
+```json
+{ "success": false, "code": "COUPON_NOT_FOUND", "message": "Không tìm thấy coupon." }
+```
+
+**Response 409** — đã bị vô hiệu hóa từ trước
+```json
+{ "success": false, "code": "COUPON_ALREADY_INACTIVE", "message": "Coupon đã bị vô hiệu hóa." }
+```
+
+**Flow bên trong:**
+```
+1. Tìm coupon theo couponId → 404 COUPON_NOT_FOUND nếu không có
+2. is_active đang = false → 409 COUPON_ALREADY_INACTIVE
+3. UPDATE coupons SET is_active = false
+4. DEL coupon:usage:{code}      (chặn validate/apply dùng tiếp ngay lập tức)
+5. coupon:user:{code}:*         cứ để tự hết hạn theo TTL, không cần xóa
+6. Trả message
+```
+
+**Vì sao soft delete?**
+- `coupon_usages` có FK trỏ tới `coupons(id)` — xóa cứng làm vỡ ràng buộc + mất audit.
+- Đơn cũ đã áp coupon này vẫn cần tra cứu lại được.
+
+**Side effect (Redis):** `DEL coupon:usage:{code}`. Sau đó `POST /coupons/validate` trả `reason: NOT_FOUND` (do filter `is_active`), `apply` tương tự.
+
+---
 
 ### GET /admin/coupons
-Danh sách coupon + thống kê lượt dùng.
+Danh sách coupon kèm thống kê lượt dùng (trang quản trị). Có phân trang.
+
+**Header:** `Authorization: Bearer {accessToken}` — role `ADMIN`
+
+**Query params:**
+```
+page     = 0                       số trang, mặc định 0
+size     = 20                      mặc định 20, tối đa 100
+status   = ALL | ACTIVE | INACTIVE | SCHEDULED | EXPIRED   lọc, mặc định ALL
+keyword  = <chuỗi>                 tìm theo code hoặc title (optional)
+sort     = createdAt,desc          mặc định
+```
+
+**Response 200**
+```json
+{
+  "success": true,
+  "message": "Lấy danh sách coupon thành công",
+  "data": {
+    "content": [
+      {
+        "couponId":       "coupon-uuid-1",
+        "code":           "SALE10",
+        "title":          "Giảm 10% tối đa 50k",
+        "discountType":   "PERCENTAGE",
+        "discountValue":  10,
+        "maxDiscount":    50000,
+        "minOrder":       200000,
+        "usageLimit":     150,
+        "usedCount":      37,
+        "remaining":      113,
+        "userLimit":      1,
+        "applicableType": "ALL",
+        "startsAt":       "2024-01-15T00:00:00Z",
+        "endsAt":         "2024-01-31T23:59:59Z",
+        "isActive":       true,
+        "status":         "ACTIVE",
+        "createdAt":      "2024-01-10T08:00:00Z"
+      }
+    ],
+    "page": 0,
+    "size": 20,
+    "totalElements": 42,
+    "totalPages": 3,
+    "stats": {
+      "totalCoupons":   42,
+      "activeCoupons":  18,
+      "expiredCoupons": 20,
+      "totalRedeemed":  1536
+    }
+  }
+}
+```
+
+**Field tính toán:**
+```
+remaining  = GET coupon:usage:{code} (Redis, realtime).
+             Key không tồn tại → fallback = usageLimit - usedCount.
+usedCount  = cột used_count (đồng bộ async từ Redis, có thể trễ vài giây).
+status     = suy ra lúc query:
+             INACTIVE  nếu is_active = false
+             SCHEDULED nếu now < starts_at
+             EXPIRED   nếu now > ends_at
+             ACTIVE    các trường hợp còn lại
+totalRedeemed = tổng used_count toàn bộ coupon (đếm coupon_usages status = APPLIED).
+```
+
+**Flow bên trong:**
+```
+1. Build query từ status + keyword; phân trang bằng Pageable(page, size, sort)
+2. Lấy 1 page coupon từ DB
+3. Gom code cả trang → MGET coupon:usage:{code}... một lần → gán remaining từng dòng
+4. Tính status cho từng dòng theo giờ hiện tại
+5. Tính block stats (nên cache 30–60s vì quét toàn bảng)
+6. Trả theo format phân trang chuẩn: content / page / size / totalElements / totalPages (+ stats)
+```
+
+**Lưu ý hiệu năng:** KHÔNG gọi Redis `GET` trong vòng lặp từng coupon — gom `code` cả trang rồi `MGET` một lần (1 round-trip).
 
 ---
 
@@ -408,7 +604,9 @@ Tạo flash sale mới.
 | Code | HTTP | Ý nghĩa |
 |------|------|---------|
 | `COUPON_INVALID` | 400 | Coupon không hợp lệ (xem reason) |
-| `COUPON_NOT_FOUND` | 404 | Mã không tồn tại |
+| `COUPON_NOT_FOUND` | 404 | Mã / coupon không tồn tại |
+| `COUPON_UPDATE_INVALID` | 400 | PUT coupon sai điều kiện (xem reason) |
+| `COUPON_ALREADY_INACTIVE` | 409 | DELETE coupon đã bị vô hiệu hóa trước đó |
 | `FLASH_SALE_SOLD_OUT` | 409 | Hết hàng flash sale |
 | `FLASH_SALE_LIMIT_REACHED` | 409 | User đã mua đủ giới hạn |
 | `FLASH_SALE_NOT_ACTIVE` | 400 | Flash sale chưa bắt đầu / đã kết thúc |
