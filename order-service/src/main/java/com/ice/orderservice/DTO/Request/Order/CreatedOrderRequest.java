@@ -13,15 +13,15 @@ import lombok.Setter;
 @AllArgsConstructor
 @NoArgsConstructor
 public class CreatedOrderRequest {
-    @NotBlank(message = "checkout Token is not empty")
+    @NotBlank(message = "checkoutToken không được để trống")
     private String checkoutToken;
 
-    @NotBlank(message = "address Id is not empty")
+    @NotBlank(message = "addressId không được để trống")
     private String addressId;
 
-    @NotNull(message = "payment method is not empty")
+    @NotNull(message = "paymentMethod không được để trống")
     private PaymentMethod paymentMethod;
 
-    @NotBlank(message = "not is not empty")
+    // Ghi chú của khách — không bắt buộc.
     private String note;
 }

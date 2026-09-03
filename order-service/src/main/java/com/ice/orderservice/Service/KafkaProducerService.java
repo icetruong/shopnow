@@ -16,6 +16,7 @@ public class KafkaProducerService {
     private static final String ORDER_CREATED = "order.created";
     private static final String ORDER_CANCELLED = "order.cancelled";
     private static final String ORDER_CONFIRMED = "order.confirmed";
+    private static final String ORDER_REFUNDED = "order.refunded";
 
     public void publishOrderCreatedEvent(OrderCreatedPayload payload)
     {
@@ -54,5 +55,18 @@ public class KafkaProducerService {
         );
 
         kafkaTemplate.send(ORDER_CONFIRMED, payload.getOrderId(), event);
+    }
+
+    public void publishOrderRefundedEvent(OrderRefundedPayload payload)
+    {
+        KafkaEvent<OrderRefundedPayload> event = new KafkaEvent<>(
+                UUID.randomUUID().toString(),
+                ORDER_REFUNDED,
+                Instant.now().toString(),
+                "1.0",
+                payload
+        );
+
+        kafkaTemplate.send(ORDER_REFUNDED, payload.getOrderId(), event);
     }
 }

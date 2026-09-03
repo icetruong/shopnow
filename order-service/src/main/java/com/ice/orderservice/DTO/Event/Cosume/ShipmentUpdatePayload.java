@@ -1,5 +1,6 @@
-package com.ice.shippingservice.DTO.Event.Publish;
+package com.ice.orderservice.DTO.Event.Cosume;
 
+import com.ice.orderservice.Enum.ShipmentStatus;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -16,7 +17,7 @@ public class ShipmentUpdatePayload {
     private String shipmentId;
     private String trackingCode;
     private String carrier;
-    private String status;
+    private ShipmentStatus status;
     private String description;
     private LocalDate estimatedDate;
 }

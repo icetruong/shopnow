@@ -1,6 +1,7 @@
 package com.ice.orderservice.Service;
 
 import com.ice.orderservice.Client.InventoryClient;
+import com.ice.orderservice.Client.PaymentClient;
 import com.ice.orderservice.DTO.Event.Cosume.PaymentProcessedPayload;
 import com.ice.orderservice.DTO.Event.Publish.KafkaEvent;
 import com.ice.orderservice.DTO.Event.Publish.OrderCancelledPayload;
@@ -9,6 +10,8 @@ import com.ice.orderservice.DTO.Event.Publish.OrderItemEvent;
 import com.ice.orderservice.DTO.Event.Publish.ShippingAddressEvent;
 import com.ice.orderservice.DTO.Request.Inventory.DeductRequest;
 import com.ice.orderservice.DTO.Request.Inventory.ReleaseRequest;
+import com.ice.orderservice.DTO.Request.Payment.RefundPaymentRequest;
+import com.ice.orderservice.DTO.Response.Payment.PaymentInternalResponse;
 import com.ice.orderservice.Entity.Order;
 import com.ice.orderservice.Entity.OrderShippingAddress;
 import com.ice.orderservice.Entity.SagaState;
@@ -43,6 +46,7 @@ public class PaymentProcessedHandler {
     private final InventoryClient inventoryClient;
     private final KafkaProducerService kafkaProducerService;
     private final IdempotencyService idempotencyService;
+    private final PaymentClient paymentClient;
 
     @Transactional
     public void handle(String message)
@@ -55,14 +59,27 @@ public class PaymentProcessedHandler {
         if(idempotencyService.isProcessed(kafkaEvent.getEventId()))
             return;
 
-        Order order = orderRepo.findById(UUID.fromString(payload.getOrderId()))
+        // 1.5: khóa dòng order -> nối tiếp với luồng HTTP cancel/update-status chạy song song.
+        Order order = orderRepo.findByIdForUpdate(UUID.fromString(payload.getOrderId()))
                 .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy order " + payload.getOrderId()));
 
         SagaState sagaState = sageStateRepo.findByOrderId(UUID.fromString(payload.getOrderId()))
                 .orElseThrow(() -> new IllegalStateException("Không tìm thấy saga cho order " + order.getId()));
 
-        if (order.getStatus() == OrderStatus.CONFIRMED || order.getStatus() == OrderStatus.CANCELLED) {
-            log.info("Order {} đã xử lý payment.processed rồi (status={}), bỏ qua", order.getId(), order.getStatus());
+        if(payload.getStatus() == PaymentGatewayStatus.SUCCESS && order.getStatus() == OrderStatus.CANCELLED)
+        {
+            order.setStatus(OrderStatus.REFUNDING);
+            order.setPaymentStatus(PaymentStatus.PAID);
+            PaymentInternalResponse payment = paymentClient.getPaymentByOrderId(order.getId().toString());
+            paymentClient.refundPayment(new RefundPaymentRequest(order.getId().toString(),
+                    order.getTotalAmount(), "CANCELLED_BEFORE_PAYMENT"), payment.getPaymentId());
+            orderRepo.save(order);
+            return;
+        }
+
+        if (order.getStatus() == OrderStatus.CONFIRMED || order.getStatus() == OrderStatus.CANCELLED
+                || order.getStatus() == OrderStatus.REFUNDING || order.getStatus() == OrderStatus.REFUNDED) {
+            log.info("Order {} đã ở trạng thái kết thúc payment (status={}), bỏ qua payment.processed", order.getId(), order.getStatus());
             return;
         }
 

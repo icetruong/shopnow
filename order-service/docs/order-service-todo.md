@@ -207,7 +207,7 @@ Hệ quả: `CONFIRMED → PROCESSING → SHIPPING → DELIVERED` **chỉ chuy�
 
 ---
 
-### 2.2. 🟠 Idempotency cho Kafka consumer (CHƯA CÓ)
+### 2.2. 🟠 Idempotency cho Kafka consumer (CHƯA CÓ) -> done
 
 **Spec:** dòng 790–802 — mỗi event có `eventId`, trước khi xử lý check Redis
 `processed:event:{eventId}` (TTL 24h).
@@ -227,7 +227,7 @@ khi xử lý, dính khóa trùng → skip.
 
 ---
 
-### 2.3. 🟠 Saga recovery scheduler (CHƯA CÓ)
+### 2.3. 🟠 Saga recovery scheduler (CHƯA CÓ) -> done
 
 **Spec:** dòng 806–824 — job chạy mỗi 2 phút quét `saga_state` `STARTED` quá 15 phút.
 
@@ -236,7 +236,7 @@ khi xử lý, dính khóa trùng → skip.
 
 ---
 
-### 2.4. 🟡 `DELIVERED → COMPLETED` tự động sau 7 ngày + endpoint khách tự xác nhận
+### 2.4. 🟡 `DELIVERED → COMPLETED` tự động sau 7 ngày + endpoint khách tự xác nhận -> bỏ qua
 
 **Spec:** dòng 440, 457 — "User xác nhận đã nhận, hoặc auto sau 7 ngày".
 
@@ -247,7 +247,7 @@ khi xử lý, dính khóa trùng → skip.
 
 ---
 
-### 2.5. 🟡 Không có luồng xử lý giao hàng thất bại / hoàn hàng
+### 2.5. 🟡 Không có luồng xử lý giao hàng thất bại / hoàn hàng -> nỏ qua
 
 `OrderStatus.FAILED` có trong enum nhưng **không chỗ nào dùng**. Spec dòng 728 nói
 `shipment.status = FAILED/RETURNED` → "alert admin xử lý tay" nhưng không định nghĩa
@@ -266,7 +266,7 @@ có đường nào ra khỏi `SHIPPING` ngoài `DELIVERED`.
 
 ---
 
-### 2.7. ⚪ Snapshot giá lấy từ cart, không phải từ Product Service
+### 2.7. ⚪ Snapshot giá lấy từ cart, không phải từ Product Service -> trong spec ghi lấy từ cart mà
 
 **Spec `Project_context.md` dòng 119:** `Order Service → Product Service GET /internal/products/{id}`
 để "Snapshot giá lúc đặt".

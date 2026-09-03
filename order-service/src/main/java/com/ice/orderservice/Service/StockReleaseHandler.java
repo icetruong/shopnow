@@ -49,7 +49,7 @@ public class StockReleaseHandler {
 
         if(idempotencyService.isProcessed(kafkaEvent.getEventId()))
             return;
-        Order order = orderRepo.findById(UUID.fromString(payload.getOrderId()))
+        Order order = orderRepo.findByIdForUpdate(UUID.fromString(payload.getOrderId()))   // 1.5: khóa dòng khi sửa
                 .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy order " + payload.getOrderId()));
 
         if (order.getStatus() == OrderStatus.CANCELLED) {

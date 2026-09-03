@@ -1,4 +1,4 @@
-package com.ice.shippingservice.Enum;
+package com.ice.orderservice.Enum;
 
 public enum ShipmentStatus {
     PENDING,

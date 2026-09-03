@@ -10,6 +10,7 @@ import com.ice.orderservice.Entity.SagaState;
 import com.ice.orderservice.Enum.OrderStatus;
 import com.ice.orderservice.Enum.SagaStatus;
 import com.ice.orderservice.Exception.ResourceNotFoundException;
+import com.ice.orderservice.Repository.OrderRepo;
 import com.ice.orderservice.Repository.OrderShippingAddressRepo;
 import com.ice.orderservice.Repository.SageStateRepo;
 import com.ice.orderservice.Service.KafkaProducerService;
@@ -32,6 +33,7 @@ public class SagaStateScheduler {
     private static final int BATCH_SIZE = 50;
 
     private final SageStateRepo sageStateRepo;
+    private final OrderRepo orderRepo;
     private final OrderShippingAddressRepo orderShippingAddressRepo;
     private final KafkaProducerService kafkaProducerService;
 
@@ -59,7 +61,10 @@ public class SagaStateScheduler {
     }
 
     private void recoverOne(SagaState saga) {
-        Order order = saga.getOrder();
+        // 1.5: khóa dòng order để không đè lên luồng HTTP/Kafka đang sửa cùng order.
+        Order order = orderRepo.findByIdForUpdate(saga.getOrder().getId())
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        "Không tìm thấy order " + saga.getOrder().getId()));
 
         if(saga.getRetryCount() >= MAX_RETRY)
         {

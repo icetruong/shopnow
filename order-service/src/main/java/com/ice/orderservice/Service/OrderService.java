@@ -36,6 +36,8 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.time.LocalDate;
 import java.time.LocalTime;
@@ -71,6 +73,12 @@ public class OrderService {
             OrderStatus.SHIPPING, Set.of(OrderStatus.DELIVERED),
             OrderStatus.DELIVERED, Set.of(OrderStatus.COMPLETED)
     );
+
+    // Vai trò ghi vào order_status_history.changed_by (cột VARCHAR(10)), không lưu userId.
+    private static final String CHANGED_BY_USER = "USER";
+    private static final String CHANGED_BY_ADMIN = "ADMIN";
+    // "SYSTEM": dành cho thay đổi do scheduler/listener tự thực hiện (hiện chưa ghi history).
+    private static final String CHANGED_BY_SYSTEM = "SYSTEM";
 
     @Transactional
     public CreatedOrderResponse createOrder(CreatedOrderRequest request, String userId) {
@@ -125,7 +133,7 @@ public class OrderService {
                 .fromStatus(null)
                 .toStatus(OrderStatus.PENDING)
                 .note("Đơn hàng được tạo")
-                .changedBy(userId)
+                .changedBy(CHANGED_BY_USER)
                 .build();
         order.getOrderStatusHistories().add(history);
 
@@ -274,6 +282,7 @@ public class OrderService {
         return "ORD" + System.currentTimeMillis();
     }
 
+    @Transactional(readOnly = true)
     public OrderPageResponse getOrders(int page, int size, OrderStatus status, LocalDate startDate, LocalDate endDate, String userId) {
 
         Specification<Order> orderSpecification = Specification
@@ -298,6 +307,7 @@ public class OrderService {
         );
     }
 
+    @Transactional(readOnly = true)
     public OrderDetailResponse getOrderDetail(String orderId, String userId) {
         Order order = orderRepo.findById(UUID.fromString(orderId))
                 .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy đơn hàng"));
@@ -311,28 +321,36 @@ public class OrderService {
 
     @Transactional
     public CancelledOrderResponse cancelledOrder(CancelledOrderRequest request, String orderId, String userId) {
-        Order order = orderRepo.findById(UUID.fromString(orderId))
+        // 1.5: khóa dòng order ngay khi đọc -> luồng payment.processed (Kafka) chạy song song
+        // phải chờ transaction này commit rồi mới đọc được trạng thái đã đổi.
+        Order order = orderRepo.findByIdForUpdate(UUID.fromString(orderId))
                 .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy đơn hàng"));
 
         if (!order.getUserId().equals(UUID.fromString(userId))) {
             throw new OrderAccessDeniedException("Đơn hàng không thuộc về bạn");
         }
 
-        return doCancelOrder(order, request, userId);
+        return doCancelOrder(order, request, CHANGED_BY_USER);
     }
 
     @Transactional
     public CancelledOrderResponse cancelOrderByAdmin(CancelledOrderRequest request, String orderId, String adminUserId) {
-        Order order = orderRepo.findById(UUID.fromString(orderId))
+        Order order = orderRepo.findByIdForUpdate(UUID.fromString(orderId))
                 .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy đơn hàng"));
 
         // Không check order.getUserId() — admin được hủy đơn của bất kỳ khách hàng nào.
-        return doCancelOrder(order, request, adminUserId);
+        return doCancelOrder(order, request, CHANGED_BY_ADMIN);
     }
 
-    private CancelledOrderResponse doCancelOrder(Order order, CancelledOrderRequest request, String changedBy) {
-        if(order.getStatus() != OrderStatus.CONFIRMED && order.getStatus() != OrderStatus.PENDING)
-        {
+    /**
+     * {@code order} phải được nạp qua {@code findByIdForUpdate} (đang giữ khóa dòng).
+     * Nhánh có refund (1.6): ghi REFUNDING trong CHÍNH transaction này, còn refund REST +
+     * hoàn kho chạy SAU khi transaction commit (afterCommit) — crash trước commit thì rollback
+     * sạch (chưa refund gì), crash sau commit thì order đã REFUNDING, listener payment.refunded
+     * / saga recovery lo tiếp.
+     */
+    private CancelledOrderResponse doCancelOrder(Order order, CancelledOrderRequest request, String changedByRole) {
+        if (order.getStatus() != OrderStatus.CONFIRMED && order.getStatus() != OrderStatus.PENDING) {
             throw new OrderCannotCancelException("Trạng thái đơn hàng không thể hủy");
         }
 
@@ -340,84 +358,85 @@ public class OrderService {
                 .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy Sage State của đơn hàng"));
 
         OrderStatus oldStatus = order.getStatus();
+        boolean paid = sagaState.getCompletedSteps().contains(CurrentStep.PAYMENT_PROCESSED.name());
+        boolean stockDeducted = sagaState.getCompletedSteps().contains(CurrentStep.STOCK_DEDUCTED.name());
+        boolean stockReserved = sagaState.getCompletedSteps().contains(CurrentStep.STOCK_RESERVED.name());
 
-        if (sagaState.getCompletedSteps().contains(CurrentStep.PAYMENT_PROCESSED.name()))
-        {
-            order.setStatus(OrderStatus.REFUNDING);
-            // REFUNDING -> REFUNDED sẽ do 1 @KafkaListener riêng lắng nghe event "payment.refunded" xử lý, không phải ở đây
-
-            PaymentInternalResponse payment = paymentClient.getPaymentByOrderId(order.getId().toString());
-
-            paymentClient.refundPayment(new RefundPaymentRequest(
-                    order.getId().toString(),
-                    order.getTotalAmount(),
-                    request.getReason()
-            ), payment.getPaymentId());
-        }
-        else
-        {
-            order.setStatus(OrderStatus.CANCELLED);
-        }
-
-        OrderStatusHistory history = OrderStatusHistory.builder()
+        OrderStatus newStatus = paid ? OrderStatus.REFUNDING : OrderStatus.CANCELLED;
+        order.setStatus(newStatus);
+        order.getOrderStatusHistories().add(OrderStatusHistory.builder()
                 .order(order)
                 .fromStatus(oldStatus)
-                .toStatus(order.getStatus())
+                .toStatus(newStatus)
                 .note(request.getReason())
-                .changedBy(changedBy)
-                .build();
-        order.getOrderStatusHistories().add(history);
+                .changedBy(changedByRole)
+                .build());
 
-        Order savedOrder = orderRepo.save(order);
-
-        if(sagaState.getCompletedSteps().contains(CurrentStep.STOCK_DEDUCTED.name()))
-        {
-            // Refund (nếu có) đã gọi thành công ở trên rồi — đây là hành động không thể hoàn tác.
-            // Nếu returnStock lỗi ở bước này, KHÔNG được để exception rollback lại toàn bộ transaction,
-            // vì như vậy sẽ tạo ra tình trạng payment-service đã ghi nhận hoàn tiền nhưng order-service
-            // lại báo lỗi và giữ nguyên trạng thái cũ — chỉ log lại để xử lý thủ công.
-            try
-            {
-                inventoryClient.returnStock(new ReturnRequest(savedOrder.getId().toString()));
-            }
-            catch (Exception e)
-            {
-                log.error("Không thể hoàn kho cho order {} sau khi hủy (đã refund thành công) — cần xử lý thủ công",
-                        savedOrder.getId(), e);
-            }
-        }
-        else if (sagaState.getCompletedSteps().contains(CurrentStep.STOCK_RESERVED.name()))
-        {
-            // Chưa từng refund ở nhánh này (order còn PENDING, chưa PAYMENT_PROCESSED) — chưa có gì
-            // không thể hoàn tác xảy ra trước đó, nên để lỗi rollback toàn bộ transaction là an toàn.
-            inventoryClient.release(new ReleaseRequest(
-                    savedOrder.getId().toString(),
-                    ReasonRelease.ORDER_CANCELLED
-            ));
+        if (!stockDeducted && stockReserved) {
+            // Chưa deduct (chưa refund gì) — lỗi ở đây để rollback cả transaction là an toàn.
+            inventoryClient.release(new ReleaseRequest(order.getId().toString(), ReasonRelease.ORDER_CANCELLED));
         }
 
         sagaState.setSagaStatus(SagaStatus.COMPENSATED);
+        orderRepo.save(order);
         sageStateRepo.save(sagaState);
 
-        boolean needReleaseStock = false;
-
         List<OrderItemEvent> items = order.getOrderItems().stream()
-                .map(orderItem -> new OrderItemEvent(orderItem.getVariantId().toString(), orderItem.getQty()))
+                .map(item -> new OrderItemEvent(item.getVariantId().toString(), item.getQty()))
                 .toList();
 
         kafkaProducerService.publishOrderCancelledEvent(new OrderCancelledPayload(
-                savedOrder.getId().toString(),
+                order.getId().toString(),
                 request.getReason(),
-                needReleaseStock,
+                false,   // needReleaseStock: đơn hủy đã tự release/return ở trên, Notification không dùng cờ này
                 items
         ));
 
-        return new CancelledOrderResponse(
-                savedOrder.getId().toString(),
-                savedOrder.getStatus().name()
-        );
+        if (paid) {
+            UUID orderId = order.getId();
+            long amount = order.getTotalAmount();
+            String reason = request.getReason();
+            runAfterCommit(() -> refundAfterCommit(orderId, amount, reason, stockDeducted));
+        }
+
+        return new CancelledOrderResponse(order.getId().toString(), newStatus.name());
     }
 
+    /** Chạy {@code action} sau khi transaction hiện tại commit (nếu có), hoặc chạy ngay nếu không có transaction. */
+    private void runAfterCommit(Runnable action) {
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    action.run();
+                }
+            });
+        } else {
+            action.run();
+        }
+    }
+
+    /** Gọi refund sang payment-service SAU khi order đã ở REFUNDING trong DB; rồi hoàn kho nếu đã deduct. */
+    private void refundAfterCommit(UUID orderId, long amount, String reason, boolean stockDeducted) {
+        try {
+            PaymentInternalResponse payment = paymentClient.getPaymentByOrderId(orderId.toString());
+            // payment-service phải idempotent: gọi refund 2 lần (retry/recovery) không hoàn tiền 2 lần.
+            paymentClient.refundPayment(
+                    new RefundPaymentRequest(orderId.toString(), amount, reason), payment.getPaymentId());
+        } catch (Exception e) {
+            log.error("Gọi refund thất bại cho order {} (order đã ở REFUNDING) — cần đối soát / gọi lại refund", orderId, e);
+            return;
+        }
+        if (stockDeducted) {
+            try {
+                inventoryClient.returnStock(new ReturnRequest(orderId.toString()));
+            } catch (Exception e) {
+                log.error("Không thể hoàn kho cho order {} sau khi refund thành công — cần xử lý thủ công", orderId, e);
+            }
+        }
+    }
+
+    @Transactional(readOnly = true)
     public OrderDetailResponse getOrderDetailInternal(String orderId) {
         Order order = orderRepo.findById(UUID.fromString(orderId))
                 .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy đơn hàng"));
@@ -425,6 +444,7 @@ public class OrderService {
         return buildOrderDetailResponse(order);
     }
 
+    @Transactional(readOnly = true)
     public List<OrderDetailResponse> getOrderOfUser(String userId, List<OrderStatus> statuses) {
         List<OrderStatus> filter = (statuses == null || statuses.isEmpty()) ?
                 List.of(OrderStatus.values())
@@ -496,6 +516,7 @@ public class OrderService {
         );
     }
 
+    @Transactional(readOnly = true)
     public AdminOrderPageResponse getOrderPageAdmin(int page, int size, OrderStatus status, PaymentStatus paymentStatus, String keyword, String userId, LocalDate startDate, LocalDate endDate) {
         Specification<Order> orderSpecification = Specification
                 .where(OrderSpecification.hasStatus(status))
@@ -523,7 +544,7 @@ public class OrderService {
 
     @Transactional
     public void updateStatusOrder(AdminUpdateStatusOrderRequest request, String orderId, String userId) {
-        Order order = orderRepo.findById(UUID.fromString(orderId))
+        Order order = orderRepo.findByIdForUpdate(UUID.fromString(orderId))   // 1.5: khóa dòng khi sửa
                 .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy đơn hàng"));
 
         OrderStatus oldStatus = order.getStatus();
@@ -549,7 +570,7 @@ public class OrderService {
                 .fromStatus(oldStatus)
                 .toStatus(order.getStatus())
                 .note(request.getNote())
-                .changedBy(userId)
+                .changedBy(CHANGED_BY_ADMIN)
                 .build();
         order.getOrderStatusHistories().add(history);
 

@@ -2,6 +2,7 @@ package com.ice.orderservice.Service;
 
 import com.ice.orderservice.DTO.Event.Cosume.PaymentRefundPayload;
 import com.ice.orderservice.DTO.Event.Publish.KafkaEvent;
+import com.ice.orderservice.DTO.Event.Publish.OrderRefundedPayload;
 import com.ice.orderservice.Entity.Order;
 import com.ice.orderservice.Entity.SagaState;
 import com.ice.orderservice.Enum.OrderStatus;
@@ -32,6 +33,7 @@ public class PaymentRefundHandler {
     private final OrderRepo orderRepo;
     private final SageStateRepo sageStateRepo;
     private final IdempotencyService idempotencyService;
+    private final KafkaProducerService kafkaProducerService;
 
     @Transactional
     public void handle(String message)
@@ -44,7 +46,7 @@ public class PaymentRefundHandler {
         if(idempotencyService.isProcessed(kafkaEvent.getEventId()))
             return;
 
-        Order order = orderRepo.findById(UUID.fromString(payload.getOrderId()))
+        Order order = orderRepo.findByIdForUpdate(UUID.fromString(payload.getOrderId()))   // 1.5: khóa dòng khi sửa
                 .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy order " + payload.getOrderId()));
 
         if(order.getStatus() == OrderStatus.REFUNDED)
@@ -63,7 +65,14 @@ public class PaymentRefundHandler {
         order.setPaymentStatus(PaymentStatus.REFUNDED);
         orderRepo.save(order);
 
-        // TODO: publish notification hoàn tiền"
+        // Notification Service consume để gửi email "Đã hoàn tiền".
+        kafkaProducerService.publishOrderRefundedEvent(new OrderRefundedPayload(
+                order.getId().toString(),
+                order.getOrderCode(),
+                order.getUserId().toString(),
+                payload.getAmount(),
+                payload.getRefundId()
+        ));
 
         idempotencyService.markProcessed(kafkaEvent.getEventId());
     }

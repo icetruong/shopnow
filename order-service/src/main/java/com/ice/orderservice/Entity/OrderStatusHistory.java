@@ -37,7 +37,8 @@ public class OrderStatusHistory {
     @Column(name = "note", columnDefinition = "TEXT")
     private String note;
     
-    @Column(name = "changed_by",length = 20, nullable = false)
+    // Vai trò của bên gây ra thay đổi: "USER" | "ADMIN" | "SYSTEM" (không lưu userId).
+    @Column(name = "changed_by", length = 10, nullable = false)
     private String changedBy;
 
     @Column(name = "created_at", nullable = false, updatable = false)
