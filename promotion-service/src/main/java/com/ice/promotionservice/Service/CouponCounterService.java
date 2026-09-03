@@ -6,6 +6,9 @@ import org.springframework.stereotype.Service;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 @Service
 @RequiredArgsConstructor
@@ -20,6 +23,26 @@ public class CouponCounterService {
     {
         String raw = stringRedisTemplate.opsForValue().get(KEY_PREFIX_USAGE+code);
         return raw == null ? null : Long.parseLong(raw);
+    }
+
+    /**
+     * Đọc "lượt còn lại" của nhiều coupon trong 1 lần MGET.
+     * Trả map code -> remaining; giá trị null nghĩa là Redis chưa có key cho code đó.
+     */
+    public Map<String, Long> getUsageRemainingBatch(List<String> codes)
+    {
+        Map<String, Long> result = new HashMap<>();
+        if (codes == null || codes.isEmpty())
+            return result;
+
+        List<String> keys = codes.stream().map(c -> KEY_PREFIX_USAGE + c).toList();
+        List<String> values = stringRedisTemplate.opsForValue().multiGet(keys);
+
+        for (int i = 0; i < codes.size(); i++) {
+            String raw = (values == null) ? null : values.get(i);
+            result.put(codes.get(i), raw == null ? null : Long.parseLong(raw));
+        }
+        return result;
     }
 
     public Long incrementUsage(String code)

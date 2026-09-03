@@ -2,8 +2,11 @@ package com.ice.promotionservice.Service;
 
 import com.ice.promotionservice.DTO.Request.Coupon.*;
 import com.ice.promotionservice.DTO.Response.Coupon.AdminCreateResponse;
+import com.ice.promotionservice.DTO.Response.Coupon.CouponAdminResponse;
 import com.ice.promotionservice.DTO.Response.Coupon.CouponApplyResponse;
 import com.ice.promotionservice.DTO.Response.Coupon.CouponUpdateResponse;
+import com.ice.promotionservice.DTO.Response.Coupon.PageCouponAdminResponse;
+import com.ice.promotionservice.DTO.Response.Coupon.StatisticsCouponAdminResponse;
 import com.ice.promotionservice.DTO.Response.Coupon.CouponUserResponse;
 import com.ice.promotionservice.DTO.Response.Coupon.ValidationCouponResponse;
 import com.ice.promotionservice.Entity.Coupon;
@@ -12,13 +15,19 @@ import com.ice.promotionservice.Enum.CouponApplicableType;
 import com.ice.promotionservice.Enum.CouponDiscountType;
 import com.ice.promotionservice.Enum.CouponAdminError;
 import com.ice.promotionservice.Enum.CouponInvalidReason;
+import com.ice.promotionservice.Enum.CouponStatus;
 import com.ice.promotionservice.Enum.CouponUsageStatus;
 import com.ice.promotionservice.Exception.CouponAdminException;
 import com.ice.promotionservice.Exception.CouponInvalidException;
 import com.ice.promotionservice.Exception.ResourceNotFoundException;
 import com.ice.promotionservice.Repository.CouponRepo;
 import com.ice.promotionservice.Repository.CouponUsageRepo;
+import com.ice.promotionservice.Util.CouponSpecification;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -26,11 +35,15 @@ import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
 public class PromotionService {
+
+    private static final int MAX_PAGE_SIZE = 100;
+    private static final int DEFAULT_PAGE_SIZE = 20;
 
     private final CouponRepo couponRepo;
     private final CouponUsageRepo couponUsageRepo;
@@ -359,5 +372,84 @@ public class PromotionService {
         couponRepo.save(coupon);
 
         couponCounterService.deleteUsage(coupon.getCode());
+    }
+
+    @Transactional(readOnly = true)
+    public PageCouponAdminResponse listCoupons(int page, int size, String status, String keyword) {
+        // 1. Chuẩn hoá tham số phân trang
+        int safePage = Math.max(page, 0);
+        int safeSize = (size < 1 || size > MAX_PAGE_SIZE) ? DEFAULT_PAGE_SIZE : size;
+        Pageable pageable = PageRequest.of(safePage, safeSize, Sort.by("createdAt").descending());
+
+        LocalDateTime now = LocalDateTime.now();
+
+        // 2. "ALL"/null -> không lọc; giá trị lạ -> IllegalArgumentException -> 400 INVALID_REQUEST
+        CouponStatus statusFilter = (status == null || status.isBlank() || "ALL".equalsIgnoreCase(status))
+                ? null
+                : CouponStatus.valueOf(status.trim().toUpperCase());
+
+        // 3. Lấy 1 trang coupon từ DB theo filter
+        Page<Coupon> result = couponRepo.findAll(CouponSpecification.filter(statusFilter, keyword, now), pageable);
+
+        // 4. remaining: gom code cả trang -> MGET 1 lần
+        List<String> codes = result.getContent().stream().map(Coupon::getCode).toList();
+        Map<String, Long> remainingByCode = couponCounterService.getUsageRemainingBatch(codes);
+
+        List<CouponAdminResponse> content = result.getContent().stream()
+                .map(c -> toCouponAdminResponse(c, now, remainingByCode.get(c.getCode())))
+                .toList();
+
+        // 5. Trả về theo format phân trang chuẩn + block statistics
+        return new PageCouponAdminResponse(
+                content,
+                result.getNumber(),
+                result.getSize(),
+                result.getTotalElements(),
+                (long) result.getTotalPages(),
+                buildStatistics(now)
+        );
+    }
+
+    private StatisticsCouponAdminResponse buildStatistics(LocalDateTime now) {
+        return new StatisticsCouponAdminResponse(
+                couponRepo.count(),
+                couponRepo.countByIsActiveTrueAndStartsAtLessThanEqualAndEndsAtGreaterThanEqual(now, now),
+                couponRepo.countByIsActiveTrueAndEndsAtLessThan(now),
+                couponUsageRepo.countByStatus(CouponUsageStatus.APPLIED)
+        );
+    }
+
+    private CouponAdminResponse toCouponAdminResponse(Coupon c, LocalDateTime now, Long redisRemaining) {
+        long remaining = (redisRemaining != null)
+                ? redisRemaining
+                : (long) c.getUsageLimit() - c.getUsedCount();   // fallback khi Redis chưa có key
+
+        return new CouponAdminResponse(
+                c.getId().toString(),
+                c.getCode(),
+                c.getTitle(),
+                c.getDiscountType().name(),
+                c.getDiscountValue(),
+                c.getMaxDiscount(),
+                c.getMinOrder(),
+                c.getUsageLimit().longValue(),
+                c.getUsedCount().longValue(),
+                remaining,
+                c.getUserLimit().longValue(),
+                c.getApplicableType().name(),
+                c.getStartsAt().atZone(ZoneId.systemDefault()).toInstant(),
+                c.getEndsAt().atZone(ZoneId.systemDefault()).toInstant(),
+                c.getIsActive(),
+                deriveStatus(c, now).name(),
+                c.getCreatedAt().atZone(ZoneId.systemDefault()).toInstant()
+        );
+    }
+
+    /** status suy ra, theo thứ tự ưu tiên: INACTIVE > SCHEDULED > EXPIRED > ACTIVE. */
+    private CouponStatus deriveStatus(Coupon c, LocalDateTime now) {
+        if (Boolean.FALSE.equals(c.getIsActive())) return CouponStatus.INACTIVE;
+        if (now.isBefore(c.getStartsAt())) return CouponStatus.SCHEDULED;
+        if (now.isAfter(c.getEndsAt())) return CouponStatus.EXPIRED;
+        return CouponStatus.ACTIVE;
     }
 }

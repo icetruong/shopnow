@@ -5,6 +5,7 @@ import com.ice.promotionservice.DTO.Request.Coupon.CouponUpdateRequest;
 import com.ice.promotionservice.DTO.Response.Common.ApiResponse;
 import com.ice.promotionservice.DTO.Response.Coupon.AdminCreateResponse;
 import com.ice.promotionservice.DTO.Response.Coupon.CouponUpdateResponse;
+import com.ice.promotionservice.DTO.Response.Coupon.PageCouponAdminResponse;
 import com.ice.promotionservice.Service.PromotionService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -54,6 +55,21 @@ public class AdminPromotionController {
                 ApiResponse.success(
                         "Đã vô hiệu hóa coupon",
                         null
+                )
+        );
+    }
+
+    @GetMapping
+    public ResponseEntity<ApiResponse<PageCouponAdminResponse>> listCoupons(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(defaultValue = "ALL") String status,
+            @RequestParam(required = false) String keyword)
+    {
+        return ResponseEntity.ok(
+                ApiResponse.success(
+                        "Lấy danh sách coupon thành công",
+                        promotionService.listCoupons(page, size, status, keyword)
                 )
         );
     }

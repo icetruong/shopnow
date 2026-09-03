@@ -348,8 +348,18 @@ page     = 0                       số trang, mặc định 0
 size     = 20                      mặc định 20, tối đa 100
 status   = ALL | ACTIVE | INACTIVE | SCHEDULED | EXPIRED   lọc, mặc định ALL
 keyword  = <chuỗi>                 tìm theo code hoặc title (optional)
-sort     = createdAt,desc          mặc định
 ```
+
+> **`status` KHÔNG phải cột trong bảng `coupons`** — nó là bí danh suy ra từ `is_active` + `starts_at` + `ends_at`.
+> Filter `?status=X` dịch thành `WHERE` như sau (dùng đúng định nghĩa với field `status` ở response):
+> ```
+> ALL        → không thêm điều kiện
+> INACTIVE   → is_active = false
+> SCHEDULED  → is_active = true AND now < starts_at
+> EXPIRED    → is_active = true AND now > ends_at
+> ACTIVE     → is_active = true AND starts_at <= now AND now <= ends_at
+> ```
+> `INACTIVE` được ưu tiên: coupon vừa `is_active = false` vừa quá hạn → tính là `INACTIVE`, không phải `EXPIRED`.
 
 **Response 200**
 ```json
@@ -382,7 +392,7 @@ sort     = createdAt,desc          mặc định
     "size": 20,
     "totalElements": 42,
     "totalPages": 3,
-    "stats": {
+    "statistics": {
       "totalCoupons":   42,
       "activeCoupons":  18,
       "expiredCoupons": 20,
@@ -397,7 +407,7 @@ sort     = createdAt,desc          mặc định
 remaining  = GET coupon:usage:{code} (Redis, realtime).
              Key không tồn tại → fallback = usageLimit - usedCount.
 usedCount  = cột used_count (đồng bộ async từ Redis, có thể trễ vài giây).
-status     = suy ra lúc query:
+status     = giá trị suy ra (KHÔNG lưu DB), tính theo thứ tự ưu tiên:
              INACTIVE  nếu is_active = false
              SCHEDULED nếu now < starts_at
              EXPIRED   nếu now > ends_at
@@ -407,10 +417,10 @@ totalRedeemed = tổng used_count toàn bộ coupon (đếm coupon_usages status
 
 **Flow bên trong:**
 ```
-1. Build query từ status + keyword; phân trang bằng Pageable(page, size, sort)
+1. Dịch status → điều kiện WHERE trên is_active/starts_at/ends_at (xem bảng trên); ghép keyword; Pageable(page, size, sort)
 2. Lấy 1 page coupon từ DB
 3. Gom code cả trang → MGET coupon:usage:{code}... một lần → gán remaining từng dòng
-4. Tính status cho từng dòng theo giờ hiện tại
+4. Tính field status cho từng dòng theo giờ hiện tại (cùng công thức với filter)
 5. Tính block stats (nên cache 30–60s vì quét toàn bảng)
 6. Trả theo format phân trang chuẩn: content / page / size / totalElements / totalPages (+ stats)
 ```

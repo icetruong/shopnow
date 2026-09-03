@@ -10,5 +10,7 @@ import java.util.UUID;
 public interface CouponUsageRepo extends JpaRepository<CouponUsage, UUID> {
     int countByUserIdAndCouponIdAndStatus(UUID userId, UUID couponId, CouponUsageStatus status);
 
+    long countByStatus(CouponUsageStatus status);
+
     Optional<CouponUsage> findByCouponCodeAndOrderId(String couponCode, UUID orderId);
 }
