@@ -6,15 +6,16 @@ import org.springframework.stereotype.Service;
 
 @Service
 @RequiredArgsConstructor
-public class CouponUsageCounter {
+public class CouponCounter {
 
-    private static final String KEY_PREFIX = "coupon:usage:";
+    private static final String KEY_PREFIX_USAGE = "coupon:usage:";
+    private static final String KEY_PREFIX_USER = ""
 
     private final StringRedisTemplate stringRedisTemplate;
 
-    public Long getRemaining(String code)
+    public Long getUsageRemaining(String code)
     {
-        String raw = stringRedisTemplate.opsForValue().get(KEY_PREFIX+code);
+        String raw = stringRedisTemplate.opsForValue().get(KEY_PREFIX_USAGE+code);
         return raw == null ? null : Long.parseLong(raw);
     }
 }
