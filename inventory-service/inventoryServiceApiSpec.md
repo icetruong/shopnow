@@ -387,18 +387,21 @@ Không publish Kafka event — Order Service gọi REST này đã biết kết q
 ---
 
 ### POST /internal/stock/flash-sale/reserve
-Reserve hàng flash sale — dùng **Redis DECR atomic** thay vì DB lock để chịu tải cao.
+Reserve hàng flash sale — dùng **Redis Lua script atomic** thay vì DB lock để chịu tải cao.
+
+> **Phân vai:** "định nghĩa" flash sale (variant nào, `flashPrice`, lịch, `limitPerUser`) do **Promotion Service** quản lý. Inventory Service chỉ giữ **counter tồn kho + chống oversell**. Promotion Service gọi endpoint này ở `POST /internal/flash-sales/purchase` của nó; `limitPerUser` được Promotion truyền vào đây.
 
 **Header:** `X-Internal-Token: {sharedSecret}`
 
 **Request Body**
 ```json
  {
-    "flashSaleId": "fs-uuid-1",
-    "variantId":   "var-uuid-1",
-    "orderId":     "order-uuid-1",
-    "userId":      "user-uuid-1",
-    "qty":         1
+    "flashSaleId":  "fs-uuid-1",
+    "variantId":    "var-uuid-1",
+    "orderId":      "order-uuid-1",
+    "userId":       "user-uuid-1",
+    "qty":          1,
+    "limitPerUser": 1
   }
 ```
 
@@ -413,22 +416,70 @@ Reserve hàng flash sale — dùng **Redis DECR atomic** thay vì DB lock để 
 
 **Response 409** — hết hàng
 ```json
+{ "success": false, "errorCode": "FLASH_SALE_SOLD_OUT", "message": "Sản phẩm flash sale đã hết." }
+```
+
+**Response 409** — user vượt giới hạn
+```json
+{ "success": false, "errorCode": "FLASH_SALE_USER_LIMIT", "message": "Bạn đã mua đủ giới hạn trong flash sale này." }
+```
+
+**Response 400** — flash sale không active
+```json
+{ "success": false, "errorCode": "FLASH_SALE_NOT_ACTIVE", "message": "Flash sale chưa bắt đầu hoặc đã kết thúc." }
+```
+
+**Logic bên trong — 1 Lua script atomic** (xem PHẦN 3, mục "Flash sale — Lua script atomic"):
+```
+KEYS = flash:stock:{fs}:{variant} , flash:user:{fs}:{variant}:{userId} , flash:active:{fs}
+ARGV = qty , limitPerUser , ttl(giây tới endsAt)
+
+1. EXISTS flash:active → 0  ⇒ return -3  (FLASH_SALE_NOT_ACTIVE)
+2. userBought + qty > limitPerUser  ⇒ return -2  (FLASH_SALE_USER_LIMIT)
+3. stock < qty  ⇒ return -1  (FLASH_SALE_SOLD_OUT)
+4. DECRBY stock qty ; INCRBY user qty ; EXPIRE user ttl
+5. return remaining (>= 0)
+
+Java map: -1/-2/-3 → throw tương ứng; >= 0 → 200.
+```
+
+**Idempotency (Order Service retry):** trước khi chạy Lua, `SET flash:done:{orderId}:{variantId} 1 EX ttl NX`. Nếu key đã tồn tại → không chạy Lua nữa, trả lại kết quả cũ.
+
+**Sau khi Lua thành công:** publish Kafka `flash.purchased` (Promotion Service consume để ghi lịch sử + analytics). Xem PHẦN 2 → "Kafka Events".
+
+---
+
+### POST /internal/stock/flash-sale/release
+Hoàn lại số lượng flash sale khi đơn bị hủy (compensating). Promotion Service gọi ở `POST /internal/flash-sales/rollback`.
+
+**Header:** `X-Internal-Token: {sharedSecret}`
+
+**Request Body**
+```json
 {
-  "success": false,
-  "errorCode":    "FLASH_SALE_SOLD_OUT",
-  "message": "Sản phẩm flash sale đã hết."
+  "flashSaleId": "fs-uuid-1",
+  "variantId":   "var-uuid-1",
+  "orderId":     "order-uuid-1",
+  "userId":      "user-uuid-1",
+  "qty":         1
 }
 ```
 
-**Logic bên trong (Redis atomic — không dùng DB lock):**
+**Response 200**
+```json
+{ "success": true, "message": "Đã hoàn lại số lượng flash sale." }
 ```
-1. Kiểm tra flash sale còn active không (Redis key flash:active:{flashSaleId})
-2. Kiểm tra user chưa mua trong flash sale này (Redis key flash:user:{flashSaleId}:{userId})
-3. DECR flash:stock:{flashSaleId}:{variantId}
-4. Nếu kết quả < 0 → INCR lại (rollback) → trả 409
-5. Nếu >= 0 → SET flash:user:{flashSaleId}:{userId} = "1" (TTL = thời gian flash sale)
-6. Đẩy vào DB async (Kafka event để ghi lại lịch sử)
+
+**Logic bên trong — 1 Lua script atomic:**
 ```
+KEYS = flash:stock:{fs}:{variant} , flash:user:{fs}:{variant}:{userId} , flash:done:{orderId}:{variant}
+
+1. EXISTS flash:done → 0  ⇒ return 0   (chưa từng reserve / đã release rồi → no-op, vẫn 200)
+2. INCRBY stock qty ; DECRBY user qty ; DEL flash:done
+3. return stock mới
+```
+- Không publish Kafka — Promotion là bên gọi, biết kết quả ngay trong response 200 (giống `reserve`).
+- Idempotent nhờ key `flash:done`: gọi lại lần 2 rơi vào bước 1 → no-op.
 
 ---
 
@@ -596,7 +647,9 @@ type      = IMPORT    (IMPORT | DEDUCT | RELEASE | ADJUSTMENT | FLASH_SALE)
 ---
 
 ### POST /admin/flash-sale-stock
-Admin khởi tạo tồn kho flash sale — ghi vào Redis trước khi flash sale bắt đầu.
+Khởi tạo tồn kho flash sale trong Redis (**"warmup"**) — chạy trước giờ G vài phút.
+
+> **Promotion Service gọi endpoint này** trong bước `POST /admin/flash-sales/{id}/warmup`. Admin không gọi trực tiếp (nhưng vẫn để role ADMIN + internal token cho tiện test).
 
 **Request Body**
 ```json
@@ -610,28 +663,33 @@ Admin khởi tạo tồn kho flash sale — ghi vào Redis trước khi flash sa
   ]
 }
 ```
+`flashPrice` / `limitPerUser` **không** nhận ở đây — Promotion giữ, truyền `limitPerUser` trong từng lần gọi `/internal/stock/flash-sale/reserve`.
 
 **Response 200**
 ```json
 {
   "success": true,
-  "message": "Đã khởi tạo tồn kho flash sale thành công."
+  "message": "Đã khởi tạo tồn kho flash sale thành công.",
+  "data": { "itemsLoaded": 2 }
 }
 ```
 
 **Logic:**
 ```
-1. Validate flashSaleQty <= stockQty thực tế của từng variant
-2. SET flash:stock:{flashSaleId}:{variantId} = flashSaleQty (TTL = thời điểm endsAt)
-3. SET flash:active:{flashSaleId} = "1" (TTL = thời điểm endsAt)
-4. INSERT vào flash_sale_stocks (lưu lại để audit)
+1. Validate flashSaleQty <= stockQty thực tế của từng variant → 409 INSUFFICIENT_STOCK nếu thiếu
+2. SET flash:stock:{flashSaleId}:{variantId} = flashSaleQty   (TTL đến endsAt)
+3. SET flash:active:{flashSaleId} = "1"                        (TTL đến endsAt)
+   (hoặc: job hẹn giờ bật đúng startsAt — tránh mua sớm trong khoảng warmup→startsAt)
+4. INSERT flash_sale_stocks (audit + restore nếu Redis mất)
 ```
+
+> **Tại sao warmup trước:** đợi request mua đầu tiên mới nạp DB→Redis → hàng nghìn request cùng cache-miss một lúc → **cache stampede**, DB nghẽn. Warmup trước → Redis sẵn sàng 100% khi giờ G tới.
 
 ---
 
 ## 4. KAFKA EVENTS — Consume
 
-Inventory Service **không consume event nào cả** — reserve/release/deduct đều do Order Service gọi REST đồng bộ trực tiếp (`POST /internal/stock/reserve|release|deduct`), không qua Kafka. Inventory Service chỉ **publish** (`stock.released` khi tự phát hiện hết hạn, `stock.low_warning`) — xem mục "Kafka Events" ở PHẦN 2.
+Inventory Service **không consume event nào cả** — reserve/release/deduct đều do Order Service gọi REST đồng bộ trực tiếp (`POST /internal/stock/reserve|release|deduct`), không qua Kafka. Inventory Service chỉ **publish**: `stock.released` (khi tự phát hiện hết hạn), `stock.low_warning`, và `flash.purchased` (mỗi lượt mua flash sale thành công → Promotion Service consume). Xem mục "Kafka Events" ở PHẦN 2.
 
 ---
 
@@ -639,9 +697,10 @@ Inventory Service **không consume event nào cả** — reserve/release/deduct 
 
 | Code | HTTP | Ý nghĩa |
 |------|------|---------|
-| `INSUFFICIENT_STOCK` | 409 | Không đủ hàng để reserve |
+| `INSUFFICIENT_STOCK` | 409 | Không đủ hàng để reserve (kể cả warmup flashSaleQty > stockQty) |
 | `FLASH_SALE_SOLD_OUT` | 409 | Hết hàng flash sale |
-| `FLASH_SALE_USER_LIMIT` | 409 | User đã mua trong flash sale này |
+| `FLASH_SALE_USER_LIMIT` | 409 | User đã mua đủ `limitPerUser` |
+| `FLASH_SALE_NOT_ACTIVE` | 400 | Flash sale chưa bắt đầu / đã kết thúc (key `flash:active` không có) |
 | `INVENTORY_NOT_FOUND` | 404 | Không tìm thấy inventory theo variantId |
 | `RESERVATION_NOT_FOUND` | 404 | Không tìm thấy reservation theo orderId |
 | `STOCK_NOT_FOUND` | 404 | Không tìm thấy variant trong kho |
@@ -662,6 +721,7 @@ Inventory Service **không consume event nào cả** — reserve/release/deduct 
 | POST | /internal/stock/deduct | 🔒 Internal | — |
 | POST | /internal/stock/return | 🔒 Internal | — |
 | POST | /internal/stock/flash-sale/reserve | 🔒 Internal | — |
+| POST | /internal/stock/flash-sale/release | 🔒 Internal | — |
 | GET | /admin/stock | ✅ | ADMIN |
 | POST | /admin/stock/{variantId}/import | ✅ | ADMIN |
 | POST | /admin/stock/{variantId}/adjust | ✅ | ADMIN |
@@ -791,9 +851,10 @@ CREATE UNIQUE INDEX idx_flash_sale_stocks_unique ON flash_sale_stocks(flash_sale
 
 | Key pattern | Value | TTL | Mục đích |
 |-------------|-------|-----|---------|
-| `flash:stock:{flashSaleId}:{variantId}` | INT (số lượng còn) | Đến lúc flash sale kết thúc | Counter atomic cho flash sale |
-| `flash:active:{flashSaleId}` | `"1"` | Đến lúc flash sale kết thúc | Kiểm tra flash sale còn chạy không |
-| `flash:user:{flashSaleId}:{userId}` | `"1"` | Đến lúc flash sale kết thúc | Giới hạn mỗi user mua 1 lần |
+| `flash:stock:{flashSaleId}:{variantId}` | INT (số lượng còn) | Đến endsAt | Counter tồn kho — DECRBY trong Lua |
+| `flash:active:{flashSaleId}` | `"1"` | Đến endsAt | Cờ flash sale còn chạy |
+| `flash:user:{flashSaleId}:{variantId}:{userId}` | **INT (số đã mua)** | Đến endsAt | So với `limitPerUser` trong Lua — **counter**, không phải `"1"` |
+| `flash:done:{orderId}:{variantId}` | `"1"` | Đến endsAt | Idempotency reserve/release theo đơn hàng |
 
 ---
 
@@ -846,11 +907,36 @@ Khi Order Service tự gọi REST `POST /internal/stock/release` (do thanh toán
 
 ---
 
+### Publish: flash.purchased
+Phát sau khi Lua `reserve` trả `>= 0` (đã DECR `flash:stock` thành công).
+
+```json
+{
+  "eventId":   "uuid-v4",
+  "eventType": "flash.purchased",
+  "timestamp": "2024-12-12T00:15:30Z",
+  "version":   "1.0",
+  "payload": {
+    "flashSaleId": "fs-uuid-1",
+    "variantId":   "var-uuid-1",
+    "userId":      "user-uuid-1",
+    "orderId":     "order-uuid-1",
+    "qty":         1
+  }
+}
+```
+**Consumer:** Promotion Service (ghi `flash_sale_purchases` async + `flash_sale_items.sold_qty += qty`; `flashPrice` Promotion tự tra từ bảng của nó), Analytics.
+> `release` (đơn bị hủy) **không** phát event — Promotion là bên gọi REST, biết kết quả ngay trong response 200.
+
 ---
 
-# PHẦN 3 — PESSIMISTIC LOCK CHI TIẾT
+---
 
-Đây là phần quan trọng nhất của Inventory Service. Cần hiểu rõ để tránh bug.
+# PHẦN 3 — CHỐNG OVERSELL: PESSIMISTIC LOCK & LUA SCRIPT
+
+Đây là phần quan trọng nhất của Inventory Service. 2 cơ chế:
+- **Đơn hàng thường** → Pessimistic Lock (DB `SELECT FOR UPDATE`).
+- **Flash sale** → Redis Lua script atomic (mục "Flash sale — Lua script atomic" bên dưới).
 
 ---
 
@@ -890,13 +976,91 @@ FOR UPDATE
 
 ---
 
-## Khi nào dùng Pessimistic, khi nào dùng Redis DECR
+## Khi nào dùng Pessimistic, khi nào dùng Redis
 
 | Tình huống | Giải pháp | Lý do |
 |---|---|---|
-| Đặt hàng thường | Pessimistic Lock (DB) | Cần transaction ACID, liên quan nhiều bảng |
-| Flash sale | Redis DECR atomic | Hàng nghìn request/giây, DB không chịu được |
+| Đặt hàng thường | Pessimistic Lock (DB, `SELECT FOR UPDATE`) | Cần transaction ACID, liên quan nhiều bảng |
+| **Flash sale** | **Redis Lua script atomic** | Hàng nghìn request/giây, DB lock không chịu được |
 | Nhập kho thủ công | Optimistic Lock (version) | Ít conflict, không cần block |
+
+---
+
+## Flash sale — Lua script atomic
+
+Flash sale **không dùng DB lock** — request xếp hàng chờ lock trên 1 row ở 5000 req/s là chết. Dùng Redis: single-thread + chạy trọn 1 Lua script như 1 lệnh không chia cắt.
+
+**Vì sao không `DECR` đơn thuần?** `DECR` đủ để chống oversell (chỉ 1 điều kiện: còn hàng). Nhưng flash sale còn phải check `limitPerUser` **cùng lúc** với trừ stock. Tách thành `GET user` → `if` → `DECR stock` → `INCR user` (4 lệnh rời) thì 1 user bắn 10 request song song có thể lách qua bước check trước khi bước tăng-counter kịp chạy. Gộp cả cụm vào 1 Lua → hết khe hở.
+
+**Script `reserve` (dùng ở `POST /internal/stock/flash-sale/reserve`):**
+
+```lua
+-- KEYS[1] = flash:stock:{flashSaleId}:{variantId}
+-- KEYS[2] = flash:user:{flashSaleId}:{variantId}:{userId}
+-- KEYS[3] = flash:active:{flashSaleId}
+-- ARGV[1] = qty
+-- ARGV[2] = limitPerUser
+-- ARGV[3] = TTL giây cho key user (= số giây tới endsAt, Java tính rồi truyền vào)
+
+if redis.call('EXISTS', KEYS[3]) == 0 then
+    return -3                                              -- flash sale không active
+end
+
+local userBought = tonumber(redis.call('GET', KEYS[2]) or '0')
+if userBought + tonumber(ARGV[1]) > tonumber(ARGV[2]) then
+    return -2                                              -- vượt limitPerUser
+end
+
+local stock = tonumber(redis.call('GET', KEYS[1]) or '0')
+if stock < tonumber(ARGV[1]) then
+    return -1                                              -- hết hàng
+end
+
+redis.call('DECRBY', KEYS[1], ARGV[1])
+redis.call('INCRBY', KEYS[2], ARGV[1])
+redis.call('EXPIRE', KEYS[2], ARGV[3])
+
+return tonumber(redis.call('GET', KEYS[1]))                -- >= 0 : remaining
+```
+
+| Trả về | Nghĩa | Java |
+|---|---|---|
+| `>= 0` | mua được, đây là `remaining` | 200 + publish `flash.purchased` |
+| `-1` | hết hàng | 409 `FLASH_SALE_SOLD_OUT` |
+| `-2` | vượt limit user | 409 `FLASH_SALE_USER_LIMIT` |
+| `-3` | flash sale không active | 400 `FLASH_SALE_NOT_ACTIVE` |
+
+**Script `release` (dùng ở `POST /internal/stock/flash-sale/release`):**
+
+```lua
+-- KEYS[1] = flash:stock:{fs}:{variant}
+-- KEYS[2] = flash:user:{fs}:{variant}:{userId}
+-- KEYS[3] = flash:done:{orderId}:{variant}
+-- ARGV[1] = qty
+
+if redis.call('EXISTS', KEYS[3]) == 0 then
+    return 0                                               -- chưa reserve / đã release → no-op
+end
+redis.call('INCRBY', KEYS[1], ARGV[1])
+redis.call('DECRBY', KEYS[2], ARGV[1])
+redis.call('DEL', KEYS[3])
+return tonumber(redis.call('GET', KEYS[1]))
+```
+
+**Gọi từ Spring:**
+```java
+DefaultRedisScript<Long> script = new DefaultRedisScript<>();
+script.setLocation(new ClassPathResource("redis/flash_reserve.lua"));
+script.setResultType(Long.class);
+
+Long r = redisTemplate.execute(script,
+        List.of(stockKey, userKey, activeKey),
+        String.valueOf(qty), String.valueOf(limitPerUser), String.valueOf(ttlSeconds));
+```
+
+**Idempotency:** trước khi chạy `reserve`, `SET flash:done:{orderId}:{variantId} 1 EX ttl NX`. Key đã tồn tại → Order Service retry → không chạy Lua, trả kết quả cũ.
+
+**Ghi DB async:** sau khi Lua trả `>= 0` → publish `flash.purchased` → Promotion Service consume ghi lịch sử. Job định kỳ sync `flash:stock` → `flash_sale_stocks.sold_qty`. Redis chết giữa chừng → warmup lại từ `flash_sale_stocks`; bật AOF để recover phần delta chưa sync.
 
 ---
 

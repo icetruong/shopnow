@@ -433,6 +433,18 @@ totalRedeemed = tổng used_count toàn bộ coupon (đếm coupon_usages status
 
 ---
 
+> ### ⚠️ Phân vai với Inventory Service
+>
+> | Việc | Chủ sở hữu | Chi tiết |
+> |---|---|---|
+> | **Định nghĩa** flash sale: variant nào, `flashPrice`, lịch `startsAt/endsAt`, `limitPerUser` | **Promotion Service** | bảng `flash_sales`, `flash_sale_items` |
+> | **Counter tồn kho** flash sale (`flash:stock`), cờ `flash:active`, counter `flash:user`, **Lua script atomic chống oversell** | **Inventory Service** | Redis keys `flash:*`, bảng `flash_sale_stocks` — xem `inventoryServiceApiSpec.md` PHẦN 3 |
+> | Lịch sử mua (`flash_sale_purchases`) + analytics | **Promotion Service** (consume event `flash.purchased` từ Inventory) | ghi async |
+>
+> → Promotion Service **KHÔNG** giữ Redis key `flash:*`, **KHÔNG** viết Lua. Các endpoint `purchase` / `rollback` / `warmup` của Promotion là **orchestration mỏng** — tra dữ liệu từ DB của mình rồi gọi REST sang Inventory Service.
+
+---
+
 ### GET /flash-sales/active
 Lấy flash sale đang diễn ra (hiển thị trang chủ).
 
@@ -467,7 +479,10 @@ Lấy flash sale đang diễn ra (hiển thị trang chủ).
 }
 ```
 
-**Lưu ý:** `remaining` lấy từ Redis (realtime), `soldPercent` để hiển thị thanh "đã bán 67%".
+**Lưu ý:**
+- `remaining` / `soldQty` lấy từ `flash_sale_items.sold_qty` của Promotion Service — cột này được đồng bộ **async** từ event `flash.purchased` (Inventory phát mỗi lượt mua), trễ ~1–2 giây. Số realtime tuyệt đối nằm ở Redis của Inventory; với trang chủ thì trễ vài giây là chấp nhận được.
+- `remaining = total_qty - sold_qty`, `soldPercent = sold_qty / total_qty * 100` để vẽ thanh "đã bán 67%".
+- `serverTime` để client đếm ngược đồng bộ, không tin giờ máy client.
 
 ---
 
@@ -518,7 +533,24 @@ Lấy flash sale đang diễn ra (hiển thị trang chủ).
 }
 ```
 
-**Flow — xem chi tiết phần 3 (Lua script).**
+**Flow bên trong (orchestration — KHÔNG đụng Redis):**
+```
+1. Tra flash_sale_items theo (flashSaleId, variantId)
+   → 404 FLASH_SALE_NOT_FOUND nếu không có
+   → lấy flashPrice, limitPerUser
+2. Gọi Inventory Service:
+   POST /internal/stock/flash-sale/reserve
+   { flashSaleId, variantId, orderId, userId, qty, limitPerUser }
+3. Map kết quả trả về từ Inventory:
+   - 200               → trả { flashPrice, remaining, reservedAt }   (gắn flashPrice từ bước 1)
+   - 409 FLASH_SALE_SOLD_OUT    → passthrough 409 FLASH_SALE_SOLD_OUT
+   - 409 FLASH_SALE_USER_LIMIT  → passthrough 409 FLASH_SALE_LIMIT_REACHED
+   - 400 FLASH_SALE_NOT_ACTIVE  → passthrough 400 FLASH_SALE_NOT_ACTIVE
+4. KHÔNG publish Kafka ở đây — Inventory phát flash.purchased sau khi DECR thành công.
+   KHÔNG ghi flash_sale_purchases ở đây — làm ở consumer (xem PHẦN 5).
+```
+
+> Idempotency (Order Service retry) do **Inventory Service** xử lý theo `orderId`. Promotion Service ở bước này là stateless.
 
 ---
 
@@ -542,6 +574,18 @@ Hoàn lại số lượng flash sale khi đơn bị hủy (compensating).
   "success": true,
   "message": "Đã hoàn lại số lượng flash sale."
 }
+```
+
+**Flow bên trong (orchestration):**
+```
+1. Gọi Inventory Service:
+   POST /internal/stock/flash-sale/release
+   { flashSaleId, variantId, orderId, userId, qty }
+   → Inventory: INCRBY flash:stock + DECRBY flash:user (atomic)
+2. Inventory trả 200 → Promotion cập nhật DB của mình NGAY (đồng bộ, không qua event):
+   UPDATE flash_sale_purchases SET status = ROLLED_BACK WHERE order_id = ? AND flash_sale_id = ?
+   UPDATE flash_sale_items    SET sold_qty = sold_qty - qty
+3. Idempotent: bản ghi flash_sale_purchases đã ROLLED_BACK (hoặc không có) → bỏ qua, vẫn trả 200.
 ```
 
 ---
@@ -579,10 +623,12 @@ Tạo flash sale mới.
 }
 ```
 
+**Side effect:** chỉ ghi DB (`flash_sales` status = SCHEDULED, `flash_sale_items`). **KHÔNG** seed Redis — việc đó ở bước warmup và do Inventory Service làm.
+
 ---
 
 ### POST /admin/flash-sales/{flashSaleId}/warmup
-**Warmup — nạp data flash sale vào Redis TRƯỚC khi bắt đầu.** Bắt buộc chạy trước giờ G vài phút.
+**Warmup — nạp tồn kho flash sale vào Redis TRƯỚC khi bắt đầu.** Bắt buộc chạy trước giờ G vài phút.
 
 **Response 200**
 ```json
@@ -595,17 +641,26 @@ Tạo flash sale mới.
 }
 ```
 
-**Flow:**
+**Flow bên trong (orchestration):**
 ```
-1. Với mỗi flash item:
-   SET flash:stock:{flashSaleId}:{variantId} = totalQty
-   SET flash:price:{flashSaleId}:{variantId} = flashPrice
-   SET flash:limit:{flashSaleId}:{variantId} = limitPerUser
-2. SET flash:active:{flashSaleId} = "1" (TTL đến endsAt)
-3. Validate totalQty <= stock thực tế (gọi Inventory Service)
+1. Đọc flash_sale_items của flashSaleId từ DB Promotion
+2. Gọi Inventory Service:
+   POST /admin/flash-sale-stock
+   {
+     flashSaleId, startsAt, endsAt,
+     items: [ { variantId, flashSaleQty: totalQty }, ... ]
+   }
+   → Inventory validate flashSaleQty <= stockQty thật + seed:
+       SET flash:stock:{flashSaleId}:{variantId} = totalQty   (TTL đến endsAt)
+       SET flash:active:{flashSaleId} = "1"                    (TTL đến endsAt)
+     và INSERT flash_sale_stocks (audit)
+3. Inventory trả 200 → Promotion: UPDATE flash_sales SET is_warmed = true
+4. (Tùy chọn) publish promotion.flash_sale_starting để Notification broadcast
 ```
 
-**Tại sao cần warmup?** Nếu đợi request đầu tiên mới load từ DB vào Redis → request đó chậm + có thể nhiều request cùng load → cache stampede. Warmup trước tránh hoàn toàn.
+`flashPrice` và `limitPerUser` **không** gửi sang Inventory ở đây — Promotion tự giữ, truyền `limitPerUser` trong từng lần gọi `/internal/stock/flash-sale/reserve`.
+
+**Tại sao cần warmup?** Nếu đợi request mua đầu tiên mới load DB → Redis: hàng nghìn request cùng cache-miss một lúc → **cache stampede**, DB nghẽn, flash sale sập giây đầu. Warmup trước → Redis sẵn sàng 100% khi giờ G tới.
 
 ---
 
@@ -617,30 +672,30 @@ Tạo flash sale mới.
 | `COUPON_NOT_FOUND` | 404 | Mã / coupon không tồn tại |
 | `COUPON_UPDATE_INVALID` | 400 | PUT coupon sai điều kiện (xem reason) |
 | `COUPON_ALREADY_INACTIVE` | 409 | DELETE coupon đã bị vô hiệu hóa trước đó |
-| `FLASH_SALE_SOLD_OUT` | 409 | Hết hàng flash sale |
-| `FLASH_SALE_LIMIT_REACHED` | 409 | User đã mua đủ giới hạn |
-| `FLASH_SALE_NOT_ACTIVE` | 400 | Flash sale chưa bắt đầu / đã kết thúc |
-| `FLASH_SALE_NOT_WARMED` | 500 | Chưa warmup Redis |
+| `FLASH_SALE_NOT_FOUND` | 404 | Không tìm thấy flash_sale_items theo (flashSaleId, variantId) |
+| `FLASH_SALE_SOLD_OUT` | 409 | Hết hàng flash sale — *passthrough từ Inventory* |
+| `FLASH_SALE_LIMIT_REACHED` | 409 | User đã mua đủ giới hạn — *passthrough từ Inventory (`FLASH_SALE_USER_LIMIT`)* |
+| `FLASH_SALE_NOT_ACTIVE` | 400 | Flash sale chưa bắt đầu / đã kết thúc — *passthrough từ Inventory* |
 
 ---
 
 ## 6. TỔNG HỢP ENDPOINTS
 
-| Method | Endpoint | Auth | Role |
-|--------|----------|------|------|
-| POST | /coupons/validate | ✅ | USER |
-| GET | /coupons/available | ✅ | USER |
-| POST | /internal/coupons/apply | 🔒 Internal | — |
-| POST | /internal/coupons/rollback | 🔒 Internal | — |
-| POST | /admin/coupons | ✅ | ADMIN |
-| PUT | /admin/coupons/{id} | ✅ | ADMIN |
-| DELETE | /admin/coupons/{id} | ✅ | ADMIN |
-| GET | /admin/coupons | ✅ | ADMIN |
-| GET | /flash-sales/active | ❌ | — |
-| POST | /internal/flash-sales/purchase | 🔒 Internal | — |
-| POST | /internal/flash-sales/rollback | 🔒 Internal | — |
-| POST | /admin/flash-sales | ✅ | ADMIN |
-| POST | /admin/flash-sales/{id}/warmup | ✅ | ADMIN |
+| Method | Endpoint | Auth | Role | Ghi chú |
+|--------|----------|------|------|---------|
+| POST | /coupons/validate | ✅ | USER | |
+| GET | /coupons/available | ✅ | USER | |
+| POST | /internal/coupons/apply | 🔒 Internal | — | |
+| POST | /internal/coupons/rollback | 🔒 Internal | — | |
+| POST | /admin/coupons | ✅ | ADMIN | |
+| PUT | /admin/coupons/{id} | ✅ | ADMIN | |
+| DELETE | /admin/coupons/{id} | ✅ | ADMIN | |
+| GET | /admin/coupons | ✅ | ADMIN | |
+| GET | /flash-sales/active | ❌ | — | đọc từ flash_sale_items.sold_qty (sync async) |
+| POST | /internal/flash-sales/purchase | 🔒 Internal | — | orchestration → gọi Inventory `/internal/stock/flash-sale/reserve` |
+| POST | /internal/flash-sales/rollback | 🔒 Internal | — | orchestration → gọi Inventory `/internal/stock/flash-sale/release` |
+| POST | /admin/flash-sales | ✅ | ADMIN | chỉ ghi DB, không seed Redis |
+| POST | /admin/flash-sales/{id}/warmup | ✅ | ADMIN | orchestration → gọi Inventory `/admin/flash-sale-stock` |
 
 ---
 
@@ -729,10 +784,10 @@ CREATE INDEX idx_flash_sales_status ON flash_sales(status);
 | flash_sale_id | UUID | NOT NULL, FK → flash_sales(id) ON DELETE CASCADE | |
 | product_id | UUID | NOT NULL | |
 | variant_id | UUID | NOT NULL | |
-| flash_price | BIGINT | NOT NULL | Giá flash sale |
-| total_qty | INT | NOT NULL | Tổng số lượng flash |
-| sold_qty | INT | NOT NULL, DEFAULT 0 | Đã bán (đồng bộ từ Redis) |
-| limit_per_user | INT | NOT NULL, DEFAULT 1 | |
+| flash_price | BIGINT | NOT NULL | Giá flash sale — Promotion sở hữu, truyền cho consumer |
+| total_qty | INT | NOT NULL | Tổng số lượng flash — gửi sang Inventory lúc warmup |
+| sold_qty | INT | NOT NULL, DEFAULT 0 | Đã bán — cập nhật async khi consume `flash.purchased` từ Inventory (không đọc Redis trực tiếp) |
+| limit_per_user | INT | NOT NULL, DEFAULT 1 | Promotion giữ, truyền vào mỗi lần gọi Inventory reserve |
 | created_at | TIMESTAMP | NOT NULL, DEFAULT NOW() | |
 
 **Index:**
@@ -766,159 +821,43 @@ CREATE UNIQUE INDEX idx_flash_purchases_unique ON flash_sale_purchases(flash_sal
 
 ---
 
-# PHẦN 3 — REDIS ATOMIC & LUA SCRIPT (điểm cốt lõi)
+# PHẦN 3 — LUA SCRIPT & CHỐNG OVERSELL → xem Inventory Service
 
----
+Toàn bộ phần Redis atomic / Lua script chống oversell của flash sale **nằm ở Inventory Service**, không phải ở đây. Xem `inventoryServiceApiSpec.md` PHẦN 3 (mục "Flash sale — Lua script atomic").
 
-## Vấn đề race condition
+Lý do phân vai: Inventory Service đã sở hữu mọi loại tồn kho, có bảng `flash_sale_stocks` để audit/restore, và validate được `flashSaleQty <= stockQty` thật. Để nó giữ luôn counter flash sale → tránh 2 service cùng `DECR` một key (split-brain).
 
+## Phần thuộc về Promotion Service: ghi DB async
+
+Promotion Service **consume** event `flash.purchased` (Inventory phát mỗi lượt mua thành công) và:
 ```
-Kho flash sale còn 1 cái. User A và User B cùng mua lúc 0h00m00s.
-
-Nếu dùng GET rồi SET (2 lệnh riêng):
-  A: GET remaining = 1  ✅
-  B: GET remaining = 1  ✅  (chưa ai trừ)
-  A: SET remaining = 0  → bán cho A
-  B: SET remaining = 0  → bán cho B
-  → OVERSELL! Bán 2 cái nhưng chỉ có 1 💀
+1. INSERT flash_sale_purchases (async, idempotent theo (flash_sale_id, user_id, order_id))
+2. UPDATE flash_sale_items.sold_qty += qty   (để GET /flash-sales/active hiển thị)
+3. Dedup bằng key processed:event:{eventId} TTL 24h
 ```
-
----
-
-## Giải pháp cơ bản: DECR atomic
-
-```
-DECR là atomic — Redis single-thread, không 2 lệnh chạy song song:
-
-  A: DECR flash:stock → trả về 0  → còn 0, bán cho A ✅
-  B: DECR flash:stock → trả về -1 → âm rồi, INCR trả lại → báo hết ✅
-
-Không bao giờ oversell vì DECR đảm bảo mỗi lệnh chạy tuần tự.
-```
-
-**Nhưng DECR đơn thuần chưa đủ** — vì còn phải check `limit_per_user` (mỗi user chỉ mua 1). Cần làm 2 việc atomic cùng lúc: check user chưa mua + trừ stock. Đây là lúc cần **Lua script**.
-
----
-
-## Lua Script — atomic hoàn chỉnh
-
-Redis chạy toàn bộ Lua script atomic (không lệnh nào xen vào giữa). Script này làm 3 việc trong 1 lần:
-
-```lua
--- KEYS[1] = flash:stock:{flashSaleId}:{variantId}
--- KEYS[2] = flash:user:{flashSaleId}:{variantId}:{userId}
--- KEYS[3] = flash:active:{flashSaleId}
--- ARGV[1] = qty muốn mua
--- ARGV[2] = limitPerUser
--- ARGV[3] = TTL cho user key (thời gian còn lại của flash sale, giây)
-
--- 1. Check flash sale còn active không
-if redis.call('EXISTS', KEYS[3]) == 0 then
-    return -3   -- flash sale không active
-end
-
--- 2. Check user đã mua bao nhiêu
-local userBought = tonumber(redis.call('GET', KEYS[2]) or '0')
-if userBought + tonumber(ARGV[1]) > tonumber(ARGV[2]) then
-    return -2   -- vượt limit per user
-end
-
--- 3. Check stock còn đủ không
-local stock = tonumber(redis.call('GET', KEYS[1]) or '0')
-if stock < tonumber(ARGV[1]) then
-    return -1   -- hết hàng
-end
-
--- 4. Đủ điều kiện → trừ stock + tăng số lượng user đã mua
-redis.call('DECRBY', KEYS[1], ARGV[1])
-redis.call('INCRBY', KEYS[2], ARGV[1])
-redis.call('EXPIRE', KEYS[2], ARGV[3])
-
--- 5. Trả về số lượng còn lại
-return redis.call('GET', KEYS[1])
-```
-
-**Kết quả trả về:**
-```
->= 0  → mua thành công, đây là số lượng còn lại
--1    → hết hàng
--2    → user vượt giới hạn
--3    → flash sale không active
-```
-
-**Tại sao Lua script?**
-- Toàn bộ 5 bước chạy **atomic** — không request nào xen vào giữa
-- Nếu tách thành nhiều lệnh Redis riêng → vẫn có race condition giữa các lệnh
-- 1 round-trip network duy nhất → nhanh
-
----
-
-## Java gọi Lua script
-
-```
-Trong Spring, dùng RedisTemplate.execute() với DefaultRedisScript:
-
-Long result = redisTemplate.execute(
-    flashSaleScript,           // Lua script đã load
-    Arrays.asList(stockKey, userKey, activeKey),  // KEYS
-    qty, limitPerUser, ttl     // ARGV
-);
-
-// Map kết quả:
-if (result == -1) → throw SoldOutException
-if (result == -2) → throw UserLimitException
-if (result == -3) → throw NotActiveException
-else → thành công, result = remaining
-```
-
----
-
-## Ghi DB async — không block user
-
-```
-Sau khi Redis trừ stock thành công:
-  1. Trả response cho user NGAY (họ thấy "mua thành công")
-  2. Publish Kafka event flash.purchased
-  3. Consumer ghi vào flash_sale_purchases (async)
-  4. Định kỳ đồng bộ sold_qty từ Redis về DB
-
-→ User không phải chờ ghi DB. Redis là nguồn chính xác realtime,
-  DB chỉ để lưu lịch sử + audit.
-```
-
----
-
-## Rollback khi đơn bị hủy
-
-```
-Compensating khi order flash sale bị hủy:
-  1. INCRBY flash:stock:{...} qty     (trả lại hàng)
-  2. DECRBY flash:user:{...} qty      (giảm số user đã mua)
-  3. UPDATE flash_sale_purchases status = ROLLED_BACK
-
-Cũng nên dùng Lua script để 2 lệnh INCRBY + DECRBY atomic.
-```
+→ Order Service nhận response ngay từ Inventory, không phải chờ Promotion ghi DB. Eventual consistency, trễ ~1–2s.
 
 ---
 
 # PHẦN 4 — REDIS KEYS TỔNG HỢP
 
+> Các key `flash:*` **thuộc Inventory Service** — không liệt kê ở đây. Xem `inventoryServiceApiSpec.md`.
+
 | Key pattern | Type | TTL | Mục đích |
 |-------------|------|-----|---------|
-| `flash:stock:{flashSaleId}:{variantId}` | String (INT) | Đến endsAt | Số lượng còn lại — DECR atomic |
-| `flash:user:{flashSaleId}:{variantId}:{userId}` | String (INT) | Đến endsAt | User đã mua bao nhiêu |
-| `flash:price:{flashSaleId}:{variantId}` | String | Đến endsAt | Giá flash sale |
-| `flash:limit:{flashSaleId}:{variantId}` | String | Đến endsAt | Giới hạn per user |
-| `flash:active:{flashSaleId}` | String | Đến endsAt | Flag flash sale đang chạy |
-| `coupon:usage:{code}` | String (INT) | Đến endsAt | Lượt còn lại — DECR atomic |
-| `coupon:user:{code}:{userId}` | String (INT) | Đến endsAt | User đã dùng mấy lần |
-| `processed:event:{eventId}` | String | 24 giờ | Idempotency |
+| `coupon:usage:{code}` | String (INT) | Đến endsAt | Lượt coupon còn lại — DECR atomic |
+| `coupon:user:{code}:{userId}` | String (INT) | Đến endsAt | User đã dùng coupon mấy lần |
+| `processed:event:{eventId}` | String | 24 giờ | Idempotency khi consume Kafka |
+
+Các key `flash:stock:*`, `flash:active:*`, `flash:user:*` do **Inventory Service** quản lý.
 
 ---
 
 # PHẦN 5 — KAFKA EVENTS
 
-### Publish: flash.purchased
+### Consume: flash.purchased
+**Do Inventory Service publish** (sau khi DECR `flash:stock` thành công). Promotion Service **consume**.
+
 ```json
 {
   "eventId":   "uuid-v4",
@@ -930,12 +869,12 @@ Cũng nên dùng Lua script để 2 lệnh INCRBY + DECRBY atomic.
     "variantId":   "var-uuid-1",
     "userId":      "user-uuid-1",
     "orderId":     "order-uuid-1",
-    "qty":         1,
-    "flashPrice":  149000
+    "qty":         1
   }
 }
 ```
-**Consumer:** Chính Promotion Service (ghi flash_sale_purchases async), Analytics
+**Promotion Service xử lý:** `flashPrice` tra từ `flash_sale_items` (payload không mang giá) → INSERT `flash_sale_purchases` (idempotent) + `flash_sale_items.sold_qty += qty`. Dedup `processed:event:{eventId}` TTL 24h.
+**Consumer khác:** Analytics.
 
 ---
 
@@ -962,25 +901,25 @@ Publish trước khi flash sale bắt đầu (VD 15 phút trước) để Notifi
 # PHẦN 6 — CÁC ĐIỂM QUAN TRỌNG KHI PHỎNG VẤN
 
 ```
-1. Tại sao dùng Redis thay vì DB lock cho flash sale?
-   → DB pessimistic lock: các request xếp hàng chờ nhau → chậm, dễ timeout
-   → Redis single-thread + atomic ops → xử lý 100k+ ops/giây, không lock
+1. Tại sao tách flash sale counter sang Inventory Service?
+   → Inventory đã sở hữu mọi loại tồn kho + validate được stockQty thật
+   → Nếu Promotion cũng giữ flash:stock → 2 service cùng DECR 1 key → split-brain
+   → Promotion giữ "định nghĩa" (giá, lịch, limitPerUser); Inventory giữ "counter"
 
-2. DECR đơn thuần vs Lua script?
-   → DECR đủ nếu chỉ cần chống oversell
-   → Lua script khi cần check nhiều điều kiện atomic (stock + user limit + active)
+2. Tại sao Redis thay vì DB lock cho flash sale? (câu hỏi cho Inventory)
+   → DB pessimistic lock: request xếp hàng chờ nhau → chậm, dễ timeout ở nghìn req/s
+   → Redis single-thread + Lua atomic → 100k+ ops/giây, không lock
 
-3. Làm sao không mất data khi Redis chết?
-   → DB là backup (flash_sale_items lưu total + sold)
-   → Redis warmup lại từ DB
-   → Redis persistence (RDB/AOF) bật để recover
+3. DECR đơn thuần vs Lua script?
+   → DECR đủ nếu chỉ chống oversell
+   → Lua script khi cần atomic nhiều điều kiện cùng lúc (active + user limit + stock)
 
 4. Tại sao warmup trước?
-   → Tránh cache stampede: nhiều request đầu tiên cùng load DB
+   → Tránh cache stampede: nghìn request đầu cùng cache-miss, cùng load DB
    → Đảm bảo Redis sẵn sàng đúng giờ G
 
-5. Consistency giữa Redis và DB?
-   → Redis là source of truth khi flash sale đang chạy (realtime)
-   → DB đồng bộ async, chấp nhận eventual consistency
-   → Sau flash sale: reconcile Redis final → DB
+5. Consistency giữa services?
+   → Redis (Inventory) là source of truth khi flash sale đang chạy
+   → Promotion nhận số qua event flash.purchased → DB đồng bộ async (~1–2s)
+   → Sau flash sale: Inventory reconcile Redis final → flash_sale_stocks.sold_qty
 ```
