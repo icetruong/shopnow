@@ -37,6 +37,23 @@ public class CouponCounterService {
         stringRedisTemplate.opsForValue().set(KEY_PREFIX_USAGE+code, usageLimit.toString(), Duration.between(LocalDateTime.now(), endAt));
     }
 
+    /**
+     * INCRBY counter "lượt còn lại" theo delta (delta âm = giảm).
+     * Dùng khi admin sửa usageLimit — cộng đúng phần chênh lệch, không SET đè để khỏi mất phần đã trừ.
+     */
+    public Long adjustUsageRemaining(String code, long delta)
+    {
+        return stringRedisTemplate.opsForValue().increment(KEY_PREFIX_USAGE + code, delta);
+    }
+
+    /** Cập nhật TTL của counter "lượt còn lại" khi admin đổi endsAt. */
+    public void updateUsageTtl(String code, LocalDateTime endAt)
+    {
+        Duration ttl = Duration.between(LocalDateTime.now(), endAt);
+        if (!ttl.isNegative() && !ttl.isZero())
+            stringRedisTemplate.expire(KEY_PREFIX_USAGE + code, ttl);
+    }
+
     public Long getUserHadUsed(String code, String userId)
     {
         String raw = stringRedisTemplate.opsForValue().get(KEY_PREFIX_USER+code+":"+userId);

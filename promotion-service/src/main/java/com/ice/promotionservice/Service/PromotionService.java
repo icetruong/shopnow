@@ -3,6 +3,7 @@ package com.ice.promotionservice.Service;
 import com.ice.promotionservice.DTO.Request.Coupon.*;
 import com.ice.promotionservice.DTO.Response.Coupon.AdminCreateResponse;
 import com.ice.promotionservice.DTO.Response.Coupon.CouponApplyResponse;
+import com.ice.promotionservice.DTO.Response.Coupon.CouponUpdateResponse;
 import com.ice.promotionservice.DTO.Response.Coupon.CouponUserResponse;
 import com.ice.promotionservice.DTO.Response.Coupon.ValidationCouponResponse;
 import com.ice.promotionservice.Entity.Coupon;
@@ -14,13 +15,14 @@ import com.ice.promotionservice.Enum.CouponInvalidReason;
 import com.ice.promotionservice.Enum.CouponUsageStatus;
 import com.ice.promotionservice.Exception.CouponAdminException;
 import com.ice.promotionservice.Exception.CouponInvalidException;
+import com.ice.promotionservice.Exception.ResourceNotFoundException;
 import com.ice.promotionservice.Repository.CouponRepo;
 import com.ice.promotionservice.Repository.CouponUsageRepo;
-import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.List;
@@ -264,6 +266,85 @@ public class PromotionService {
         return new AdminCreateResponse(
                 coupon.getId().toString(),
                 coupon.getCode()
+        );
+    }
+
+    @Transactional
+    public CouponUpdateResponse updateCoupon(UUID couponId, CouponUpdateRequest request) {
+        // 1. Tìm coupon
+        Coupon coupon = couponRepo.findById(couponId)
+                .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy coupon: " + couponId));
+
+        // 2. code không được đổi
+        if (request.getCode() != null
+                && !request.getCode().trim().toUpperCase().equals(coupon.getCode()))
+            throw new CouponAdminException(CouponAdminError.CODE_IMMUTABLE);
+
+        // 3. Gộp giá trị mới với giá trị cũ (field nào null thì giữ nguyên)
+        CouponDiscountType discountType = request.getDiscountType() != null
+                ? request.getDiscountType() : coupon.getDiscountType();
+        Long discountValue = request.getDiscountValue() != null
+                ? request.getDiscountValue() : coupon.getDiscountValue();
+        CouponApplicableType applicableType = request.getApplicableType() != null
+                ? request.getApplicableType() : coupon.getApplicableType();
+        List<UUID> applicableIds = request.getApplicableIds() != null
+                ? request.getApplicableIds() : coupon.getApplicableIds();
+        LocalDateTime startsAt = request.getStartsAt() != null
+                ? request.getStartsAt().atZone(ZoneId.systemDefault()).toLocalDateTime()
+                : coupon.getStartsAt();
+        LocalDateTime endsAt = request.getEndsAt() != null
+                ? request.getEndsAt().atZone(ZoneId.systemDefault()).toLocalDateTime()
+                : coupon.getEndsAt();
+
+        // 4. Validate nghiệp vụ trên giá trị đã gộp
+        if (!endsAt.isAfter(startsAt))
+            throw new CouponAdminException(CouponAdminError.TIME_RANGE_INVALID);
+
+        if (discountType == CouponDiscountType.PERCENTAGE
+                && (discountValue < 1 || discountValue > 100))
+            throw new CouponAdminException(CouponAdminError.DISCOUNT_VALUE_INVALID);
+
+        if (applicableType != CouponApplicableType.ALL
+                && (applicableIds == null || applicableIds.isEmpty()))
+            throw new CouponAdminException(CouponAdminError.APPLICABLE_IDS_REQUIRED);
+
+        // 5. Đổi usageLimit → chỉnh counter Redis theo đúng phần chênh lệch
+        Integer newUsageLimit = request.getUsageLimit();
+        if (newUsageLimit != null && !newUsageLimit.equals(coupon.getUsageLimit())) {
+            if (newUsageLimit < coupon.getUsedCount())
+                throw new CouponAdminException(CouponAdminError.USAGE_LIMIT_BELOW_USED);
+            long delta = newUsageLimit - coupon.getUsageLimit();
+            couponCounterService.adjustUsageRemaining(coupon.getCode(), delta);
+            coupon.setUsageLimit(newUsageLimit);
+        }
+
+        // 6. Đổi endsAt → cập nhật TTL của counter Redis
+        if (request.getEndsAt() != null && !endsAt.equals(coupon.getEndsAt()))
+            couponCounterService.updateUsageTtl(coupon.getCode(), endsAt);
+
+        // 7. Ghi các field còn lại
+        if (request.getTitle() != null) coupon.setTitle(request.getTitle());
+        if (request.getMaxDiscount() != null) coupon.setMaxDiscount(request.getMaxDiscount());
+        if (request.getMinOrder() != null) coupon.setMinOrder(request.getMinOrder());
+        if (request.getUserLimit() != null) coupon.setUserLimit(request.getUserLimit());
+        if (request.getIsActive() != null) coupon.setIsActive(request.getIsActive());
+        coupon.setDiscountType(discountType);
+        coupon.setDiscountValue(discountValue);
+        coupon.setApplicableType(applicableType);
+        coupon.setApplicableIds(applicableIds);
+        coupon.setStartsAt(startsAt);
+        coupon.setEndsAt(endsAt);
+
+        couponRepo.save(coupon);
+
+        // 8. Trả về (remaining đọc lại từ Redis)
+        return new CouponUpdateResponse(
+                coupon.getId().toString(),
+                coupon.getCode(),
+                coupon.getUsageLimit(),
+                coupon.getUsedCount(),
+                couponCounterService.getUsageRemaining(coupon.getCode()),
+                Instant.now()
         );
     }
 }

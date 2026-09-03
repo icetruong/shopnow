@@ -1,17 +1,23 @@
 package com.ice.promotionservice.Controller;
 
 import com.ice.promotionservice.DTO.Request.Coupon.AdminCreateRequest;
+import com.ice.promotionservice.DTO.Request.Coupon.CouponUpdateRequest;
 import com.ice.promotionservice.DTO.Response.Common.ApiResponse;
 import com.ice.promotionservice.DTO.Response.Coupon.AdminCreateResponse;
+import com.ice.promotionservice.DTO.Response.Coupon.CouponUpdateResponse;
 import com.ice.promotionservice.Service.PromotionService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+
+import java.util.UUID;
 
 @RestController
 @RequiredArgsConstructor
@@ -27,6 +33,19 @@ public class AdminPromotionController {
                 ApiResponse.success(
                         "Tạo mã giảm giá thành công",
                         promotionService.createCoupon(request)
+                )
+        );
+    }
+
+    @PutMapping("/{couponId}")
+    public ResponseEntity<ApiResponse<CouponUpdateResponse>> updateCoupon(
+            @PathVariable UUID couponId,
+            @Valid @RequestBody CouponUpdateRequest request)
+    {
+        return ResponseEntity.ok(
+                ApiResponse.success(
+                        "Cập nhật coupon thành công",
+                        promotionService.updateCoupon(couponId, request)
                 )
         );
     }
