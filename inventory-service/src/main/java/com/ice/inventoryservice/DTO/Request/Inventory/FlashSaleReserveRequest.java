@@ -24,4 +24,7 @@ public class FlashSaleReserveRequest {
     @NotNull(message = "quantity must not null")
     @Min(value = 1, message = "quantity must > 0")
     private Integer qty;
+    @NotNull(message = "limitPerUser must not null")
+    @Min(value = 1, message = "limitPerUser must > 0")
+    private Integer limitPerUser;
 }

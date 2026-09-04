@@ -16,14 +16,21 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class KafkaProducerService {
     private final KafkaTemplate<String, Object> kafkaTemplate;
-    private static final String FLASH_SALE = "flash-sale-reserved";
     private static final String RELEASE = "stock.released";
     private static final String LOW_WARNING = "stock.low_warning";
     private static final String STOCK_CHANGED = "stock.changed";
+    private static final String FLASH_PURCHASED = "flash.purchased";
 
-    public void publishFlashSaleEvent(FlashSaleReservedEvent event)
-    {
-        kafkaTemplate.send(FLASH_SALE, event.getOrderId(), event);
+    public void publishFlashPurchased(FlashPurchasedPayload payload) {
+        KafkaEvent<FlashPurchasedPayload> event = new KafkaEvent<>(
+                UUID.randomUUID().toString(),
+                FLASH_PURCHASED,
+                Instant.now().toString(),
+                "1.0",
+                payload
+        );
+
+        kafkaTemplate.send(FLASH_PURCHASED, payload.getOrderId(), event);
     }
 
     public void publishReleaseEvent(ReleaseResponse response, List<ItemReserveRequest> itemsKafka, String reason) {

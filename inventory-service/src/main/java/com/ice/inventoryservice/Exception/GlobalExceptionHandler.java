@@ -85,4 +85,10 @@ public class GlobalExceptionHandler {
             return ResponseEntity.status(HttpStatus.CONFLICT)
                     .body(new ApiResponse<>(false,ex.getMessage(),ex.variantIds,"INVENTORY_ALREADY_EXISTS"));
     }
+
+    @ExceptionHandler(FlashSaleNotActiveException.class)
+    public ResponseEntity<ApiResponse<Void>> handleFlashSaleNotActive(FlashSaleNotActiveException ex) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(ApiResponse.fail(ex.getMessage(), "FLASH_SALE_NOT_ACTIVE"));
+    }
 }
