@@ -44,6 +44,7 @@ public class FlashSaleService {
     private static final String KEY_USER   = "flash:user:%s:%s:%s";
     private static final String KEY_STOCK  = "flash:stock:%s:%s";
     private static final String KEY_DONE   = "flash:done:%s:%s";
+    private static final int STOCK_KEY_GRACE_MINUTES = 10;
 
     /** Chuẩn hoá UUID về dạng canonical để key Redis luôn khớp giữa các request/endpoint. */
     private static String norm(String uuid) {
@@ -177,6 +178,7 @@ public class FlashSaleService {
         List<FlashSaleStock> flashSaleStocks = new ArrayList<>();
         for (Inventory inventory : inventories)
         {
+            inventory.setReservedQty(inventory.getReservedQty()+itemsMap.get(inventory.getVariantId()));
             flashSaleStocks.add(FlashSaleStock.builder()
                     .flashSaleId(flashSaleId)
                     .variantId(inventory.getVariantId())
@@ -194,7 +196,7 @@ public class FlashSaleService {
 
         // 2) Redis: chỉ nạp counter tồn kho. flash:active KHÔNG bật ở đây
         //    -> bật riêng qua activate() đúng startsAt (Promotion Service gọi).
-        Duration ttl = Duration.between(now, request.getEndsAt());
+        Duration ttl = Duration.between(now, request.getEndsAt()).plusMinutes(STOCK_KEY_GRACE_MINUTES);
         for (Inventory inventory : inventories)
         {
             String stockKey = KEY_STOCK.formatted(flashSaleId.toString(), inventory.getVariantId().toString());

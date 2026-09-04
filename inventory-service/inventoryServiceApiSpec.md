@@ -447,6 +447,8 @@ Java map: -1/-2/-3 → throw tương ứng; >= 0 → 200.
 
 **Sau khi Lua thành công:** publish Kafka `flash.purchased` (Promotion Service consume để ghi lịch sử + analytics). Xem PHẦN 2 → "Kafka Events".
 
+**Không ghi DB ở request path.** `reserve` chỉ đụng Redis + Kafka. Việc phản ánh số đã bán về `inventories` / `stock_transactions` do **settlement job** làm theo mẻ (xem PHẦN 3 → "Scheduled Job — Đối soát flash sale về `inventories`").
+
 ---
 
 ### POST /internal/stock/flash-sale/release
@@ -480,6 +482,7 @@ KEYS = flash:stock:{fs}:{variant} , flash:user:{fs}:{variant}:{userId} , flash:d
 ```
 - Không publish Kafka — Promotion là bên gọi, biết kết quả ngay trong response 200 (giống `reserve`).
 - Idempotent nhờ key `flash:done`: gọi lại lần 2 rơi vào bước 1 → no-op.
+- **Không ghi DB** — chỉ trả số về Redis `flash:stock`. Settlement job dựa trên delta của counter sẽ tự cộng trả `inventories` ở mẻ kế tiếp (delta âm).
 
 ---
 
@@ -696,10 +699,17 @@ Khởi tạo tồn kho flash sale trong Redis (**"warmup"**) — chạy trước
 2. Đã tồn tại flash_sale_stocks cho flashSaleId → 409 FLASH_SALE_ALREADY_EXISTS
 3. Validate flashSaleQty <= availableQty (= stockQty - reservedQty) từng variant
    → thiếu inventory: 404 INVENTORY_NOT_FOUND ; không đủ: 409 NOT_ENOUGH
-4. INSERT flash_sale_stocks (audit + restore nếu Redis mất) + flush NGAY
-   (ghi DB trước Redis: lỗi ràng buộc un(flash_sale_id, variant_id) → rollback trước khi đụng Redis)
-5. SET flash:stock:{flashSaleId}:{variantId} = flashSaleQty   (TTL đến endsAt)
+4. BEGIN TX
+   a. UPDATE inventories SET reserved_qty += flashSaleQty   (CARVE-OUT: giữ chỗ phần hàng cho flash sale)
+   b. INSERT flash_sale_stocks (initial_qty = flashSaleQty, sold_qty = 0, settled_at = NULL)
+   c. flush NGAY  (lỗi ràng buộc un(flash_sale_id, variant_id) → rollback TRƯỚC khi đụng Redis)
+   COMMIT
+5. SET flash:stock:{flashSaleId}:{variantId} = flashSaleQty   (TTL = endsAt + GRACE, ~10 phút)
 ```
+
+> **CARVE-OUT (Kiểu B):** warmup cộng `reserved_qty += flashSaleQty` để "khoá" phần hàng dành cho flash sale, tránh kênh mua thường bán chồng lên. Số này KHÔNG rời `stock_qty` ngay — settlement job mới chuyển dần `reserved → sold` theo số thực bán, và trả lại phần dư khi flash sale kết thúc. Vì vậy `reserve`/`release` của flash sale không đụng DB.
+
+> **GRACE cho `flash:stock`:** TTL của counter đặt quá `endsAt` một khoảng (~10 phút) để settlement job có cửa sổ đọc lần cuối sau khi sale đóng. `flash:active` vẫn TTL = `endsAt` chính xác (dừng bán đúng giờ).
 
 > **KHÔNG** set `flash:active` ở bước warmup. Cờ `flash:active` bật riêng qua `POST /internal/flash-sale-stock/{flashSaleId}/activate` đúng thời điểm `startsAt` — tránh mua sớm trong khoảng warmup→startsAt.
 
@@ -825,6 +835,8 @@ CREATE INDEX idx_inventories_stock_qty ON inventories(stock_qty);
 Vì 2 service dùng 2 database khác nhau (DB per service pattern).
 `variant_id` ở đây là UUID reference logic — Inventory Service tự validate bằng cách gọi REST sang Product Service khi cần.
 
+> **`reserved_qty` gánh 2 vai:** (1) hàng đang giữ chờ thanh toán cho đơn thường (qua `stock_reservations`); (2) **carve-out flash sale** — lúc warmup cộng `reserved_qty += flashSaleQty` để khoá phần hàng cho flash sale. Settlement job (PHẦN 3) chuyển phần (2) sang `sold_qty` theo số thực bán và trả lại phần dư khi sale kết thúc.
+
 ---
 
 ## Bảng: stock_reservations
@@ -878,27 +890,31 @@ CREATE INDEX idx_stock_txn_type ON stock_transactions(type);
 CREATE INDEX idx_stock_txn_created_at ON stock_transactions(created_at DESC);
 ```
 
+> **`type = FLASH_SALE`:** do **settlement job** (PHẦN 3) ghi, mỗi mẻ tối đa 1 dòng / variant có biến động. `qty` âm = số bán thêm trong mẻ (hàng rời `stock_qty`); `qty` dương = số hoàn ròng (đơn flash bị huỷ nhiều hơn số mua mới trong mẻ). `order_id` = NULL (gộp nhiều đơn), `note` ghi `flashSaleId` + mốc mẻ.
+
 ---
 
 ## Bảng: flash_sale_stocks
 
-Lưu cấu hình tồn kho flash sale (để audit + restore nếu Redis mất).
+Lưu cấu hình + tiến độ tồn kho flash sale (audit, restore nếu Redis mất, và là **nguồn / mốc đối soát** cho settlement job).
 
 | Column | Type | Constraint | Ghi chú |
 |--------|------|-----------|---------|
 | id | UUID | PK, DEFAULT uuid_generate_v4() | |
 | flash_sale_id | UUID | NOT NULL | Reference sang Promotion Service |
 | variant_id | UUID | NOT NULL | |
-| initial_qty | INT | NOT NULL | Số lượng flash sale ban đầu |
-| sold_qty | INT | NOT NULL, DEFAULT 0 | Đã bán trong flash sale |
+| initial_qty | INT | NOT NULL | Số lượng flash sale ban đầu (= carve-out cộng vào `inventories.reserved_qty` lúc warmup) |
+| sold_qty | INT | NOT NULL, DEFAULT 0 | Số đã bán đã **đối soát** — settlement job cập nhật từ Redis counter theo mẻ (`initial_qty - flash:stock`) |
 | starts_at | TIMESTAMP | NOT NULL | |
 | ends_at | TIMESTAMP | NOT NULL | |
+| settled_at | TIMESTAMP | NULLABLE | Thời điểm settlement job chốt sổ lần cuối (sau `ends_at`). NULL = chưa chốt; job bỏ qua row đã có `settled_at` |
 | created_at | TIMESTAMP | NOT NULL, DEFAULT NOW() | |
 
 **Index:**
 ```sql
 CREATE INDEX idx_flash_sale_stocks_flash_sale_id ON flash_sale_stocks(flash_sale_id);
 CREATE UNIQUE INDEX idx_flash_sale_stocks_unique ON flash_sale_stocks(flash_sale_id, variant_id);
+CREATE INDEX idx_flash_sale_stocks_settle ON flash_sale_stocks(settled_at, ends_at);  -- job quét row chưa chốt
 ```
 
 ---
@@ -907,10 +923,10 @@ CREATE UNIQUE INDEX idx_flash_sale_stocks_unique ON flash_sale_stocks(flash_sale
 
 | Key pattern | Value | TTL | Mục đích |
 |-------------|-------|-----|---------|
-| `flash:stock:{flashSaleId}:{variantId}` | INT (số lượng còn) | Đến endsAt | Counter tồn kho — DECRBY trong Lua. Set khi **warmup** (`POST /internal/flash-sale-stock`) |
-| `flash:active:{flashSaleId}` | `"1"` | Đến endsAt | Cờ flash sale còn chạy. Set khi **activate** (`POST /internal/flash-sale-stock/{id}/activate`) đúng `startsAt`, KHÔNG set lúc warmup |
-| `flash:user:{flashSaleId}:{variantId}:{userId}` | **INT (số đã mua)** | Đến endsAt | So với `limitPerUser` trong Lua — **counter**, không phải `"1"` |
-| `flash:done:{orderId}:{variantId}` | `"1"` | Đến endsAt | Idempotency reserve/release theo đơn hàng |
+| `flash:stock:{flashSaleId}:{variantId}` | INT (số lượng còn) | **endsAt + GRACE** (~10 phút) | Counter tồn kho — DECRBY trong Lua. Set khi **warmup**. GRACE để settlement job đọc lần cuối sau khi sale đóng |
+| `flash:active:{flashSaleId}` | `"1"` | Đến endsAt (chính xác) | Cờ flash sale còn chạy. Set khi **activate** (`POST /internal/flash-sale-stock/{id}/activate`) đúng `startsAt`, KHÔNG set lúc warmup |
+| `flash:user:{flashSaleId}:{variantId}:{userId}` | **INT (số đã mua)** | endsAt + GRACE | So với `limitPerUser` trong Lua — **counter**, không phải `"1"` |
+| `flash:done:{orderId}:{variantId}` | `"1"` | endsAt + GRACE | Idempotency reserve/release theo đơn hàng (release có thể tới sau endsAt) |
 
 ---
 
@@ -1116,7 +1132,7 @@ Long r = redisTemplate.execute(script,
 
 **Idempotency:** trước khi chạy `reserve`, `SET flash:done:{orderId}:{variantId} 1 EX ttl NX`. Key đã tồn tại → Order Service retry → không chạy Lua, trả kết quả cũ.
 
-**Ghi DB async:** sau khi Lua trả `>= 0` → publish `flash.purchased` → Promotion Service consume ghi lịch sử. Job định kỳ sync `flash:stock` → `flash_sale_stocks.sold_qty`. Redis chết giữa chừng → nạp lại key từ `flash_sale_stocks` (đường phục hồi này KHÔNG đi qua `POST /internal/flash-sale-stock` vì endpoint đó chặn 409 nếu đã có bản ghi — cần path phục hồi riêng); bật AOF để recover phần delta chưa sync.
+**Ghi DB async (Kiểu B):** `reserve`/`release` **không** đụng `inventories`. Sau khi Lua `reserve` trả `>= 0` → publish `flash.purchased` (Promotion consume). Riêng phía Inventory, một **settlement job** định kỳ đối soát counter Redis về DB — xem "Scheduled Job — Đối soát flash sale về `inventories`" bên dưới. Redis chết giữa chừng → mất phần delta chưa đối soát (cửa sổ nhỏ nếu job chạy mỗi ~1 phút); bật AOF + nạp lại key từ `flash_sale_stocks` (đường phục hồi này KHÔNG đi qua `POST /internal/flash-sale-stock` vì endpoint đó chặn 409 nếu đã có bản ghi — cần path phục hồi riêng).
 
 ---
 
@@ -1138,3 +1154,63 @@ Logic:
      e. COMMIT
   3. Publish stock.released event với reason = RESERVATION_EXPIRED
 ```
+
+---
+
+## Scheduled Job — Đối soát flash sale về `inventories` (settlement)
+
+Vì `reserve`/`release` flash sale **chỉ chạy trên Redis**, cần một job kéo kết quả bán về DB thật. Job này là **thứ duy nhất** đụng `inventories` / `stock_transactions` cho flash sale.
+
+```
+Job: settleFlashSales()
+Chạy: mỗi 1 phút
+
+Với mỗi row r trong flash_sale_stocks WHERE settled_at IS NULL:
+
+  cur = GET flash:stock:{r.flash_sale_id}:{r.variant_id}     -- có thể null nếu key đã hết GRACE
+  isFinal = now > r.ends_at
+
+  ── Đồng bộ delta (khi còn đọc được counter) ──
+  nếu cur != null:
+      soldNow = clamp(r.initial_qty - toInt(cur), 0, r.initial_qty)
+      delta   = soldNow - r.sold_qty          -- >0: bán thêm ; <0: hoàn ròng kể từ mẻ trước
+      nếu delta != 0:
+          BEGIN TX
+            SELECT FOR UPDATE inventories WHERE variant_id = r.variant_id
+            UPDATE inventories SET
+                stock_qty    = stock_qty    - delta,     -- delta<0 => cộng trả
+                reserved_qty = reserved_qty - delta,     -- chuyển carve-out: reserved -> sold
+                sold_qty     = sold_qty     + delta
+            INSERT stock_transactions(
+                type='FLASH_SALE', qty = -delta, qty_before, qty_after,
+                order_id = NULL,
+                note = 'Đối soát flash sale ' || r.flash_sale_id || ' mẻ ' || now)
+            UPDATE flash_sale_stocks SET sold_qty = soldNow WHERE id = r.id
+          COMMIT
+      nếu cur == null AND NOT isFinal:
+          -- key mất bất thường trước endsAt (Redis evicted / sự cố) -> log cảnh báo, chờ mẻ sau / phục hồi thủ công
+
+  ── Chốt sổ lần cuối (sau endsAt) ──
+  nếu isFinal:
+      -- tại đây r.sold_qty đã là số bán cuối (từ lần sync ở trên, hoặc lần sync trước nếu key đã mất)
+      remainder = r.initial_qty - r.sold_qty       -- phần flash sale KHÔNG bán được
+      BEGIN TX
+        SELECT FOR UPDATE inventories WHERE variant_id = r.variant_id
+        UPDATE inventories SET reserved_qty = reserved_qty - remainder   -- trả carve-out dư về available
+        UPDATE flash_sale_stocks SET settled_at = now WHERE id = r.id
+      COMMIT
+      -- (tuỳ chọn) DEL flash:stock / flash:user còn sót
+```
+
+**Bất biến sau khi chốt:** với mỗi variant của flash sale,
+`Σ delta đã áp = sold_qty cuối` và `reserved_qty` đã trừ đủ `initial_qty` (phần bán vào `sold_qty`, phần dư trả về `available`). Không đụng `stock_qty` cho phần dư (số đó chưa từng rời kho).
+
+**Vì sao 1 công thức xử lý cả mua lẫn huỷ:** `release` làm `INCRBY flash:stock` → `cur` tăng → `soldNow` giảm → `delta` âm → nhánh UPDATE tự đảo dấu (`stock_qty += |delta|`, `reserved_qty += |delta|`, `sold_qty -= |delta|`) và ghi `stock_transactions.qty` dương. Không cần nhánh riêng cho hoàn hàng.
+
+**Idempotency / an toàn khi job chạy chồng (nhiều instance):**
+- Mọi thay đổi tính theo **delta** so với `flash_sale_stocks.sold_qty` đã lưu, và cập nhật `sold_qty` trong cùng transaction có `SELECT FOR UPDATE inventories` → 2 instance xử lý cùng row sẽ nối tiếp, instance sau thấy `delta = 0`.
+- Vẫn nên thêm distributed lock (ShedLock) cho cả 2 scheduled job của service.
+
+**Ràng buộc thứ tự:** job chỉ chốt (`settled_at`) sau `ends_at` + đã có ít nhất 1 lần đọc được `cur` sau `ends_at` (nhờ GRACE của key `flash:stock`). Nếu key mất trước khi kịp đọc lần cuối → dùng `sold_qty` gần nhất, chấp nhận sai lệch tối đa = lượng mua trong (lần sync cuối → key mất); giảm rủi ro bằng cách chạy job dày hơn hoặc tăng GRACE.
+
+**Quan hệ với `flash.purchased`:** event Kafka phục vụ Promotion (lịch sử mua, analytics, `flash_sale_items.sold_qty` phía Promotion). Settlement job là việc nội bộ Inventory, độc lập — không consume/không phụ thuộc event này.

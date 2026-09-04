@@ -18,6 +18,7 @@ import java.util.UUID;
         },
         indexes = {
                 @Index(name = "idx_flash_sale_stocks_flash_sale_id", columnList = "flash_sale_id"),
+                @Index(name = "idx_flash_sale_stocks_settle", columnList = "settled_at, ends_at"),
         }
 )
 @Getter
@@ -49,6 +50,9 @@ public class FlashSaleStock {
 
     @Column(name = "ends_at", nullable = false)
     private LocalDateTime endsAt;
+
+    @Column(name = "settled_at")
+    private LocalDateTime settledAt;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
