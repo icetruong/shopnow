@@ -2,6 +2,7 @@ package com.ice.promotionservice.Service;
 
 import com.ice.promotionservice.Client.InventoryClient;
 import com.ice.promotionservice.Client.ProductClient;
+import com.ice.promotionservice.DTO.Event.Consume.FlashPurchasedPayload;
 import com.ice.promotionservice.DTO.Request.Coupon.*;
 import com.ice.promotionservice.DTO.Request.FlashSale.CreateAdminFlashSaleItemRequest;
 import com.ice.promotionservice.DTO.Request.FlashSale.CreateAdminFlashSaleRequest;
@@ -35,6 +36,7 @@ import com.ice.promotionservice.Repository.*;
 import com.ice.promotionservice.Util.CouponSpecification;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -53,6 +55,7 @@ import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class PromotionService {
 
     private static final int MAX_PAGE_SIZE = 100;
@@ -66,6 +69,7 @@ public class PromotionService {
     private final FlashSalePurchaseRepo flashSalePurchaseRepo;
     private final ProductClient productClient;
     private final InventoryClient inventoryClient;
+    private final IdempotencyService idempotencyService;
 
     public ValidationCouponResponse validationCoupon(ValidationCouponRequest request) {
 
@@ -601,6 +605,47 @@ public class PromotionService {
         return new WarmupFlashSaleResponse(
                 flashSaleItems.size()
         );
+    }
+
+    @Transactional
+    public void purchaseFlashSale(FlashPurchasedPayload payload, String eventId) {
+        if(idempotencyService.isProcessed(eventId))
+            return;
+
+        FlashSaleItem flashSaleItem = flashSaleItemRepo.findByFlashSaleIdAndVariantId(
+                UUID.fromString(payload.getFlashSaleId()),
+                UUID.fromString(payload.getVariantId())
+        ).orElse(null);
+        if (flashSaleItem == null) {
+            // Event trỏ tới flash_sale_item không tồn tại -> data lệch, retry không cứu được.
+            // Bỏ qua + đánh dấu đã xử lý để không bị redeliver spam.
+            log.warn("Bỏ qua flash.purchased eventId={}: không thấy flash_sale_item (flashSaleId={}, variantId={})",
+                    eventId, payload.getFlashSaleId(), payload.getVariantId());
+            idempotencyService.markProcessed(eventId);
+            return;
+        }
+
+        boolean isExist = flashSalePurchaseRepo.findByFlashSaleIdAndOrderId(
+                UUID.fromString(payload.getFlashSaleId()),
+                UUID.fromString(payload.getOrderId())
+        ).isPresent();
+        if(!isExist)
+        {
+            flashSalePurchaseRepo.save( FlashSalePurchase.builder()
+                    .flashSaleId(UUID.fromString(payload.getFlashSaleId()))
+                    .variantId(UUID.fromString(payload.getVariantId()))
+                    .userId(UUID.fromString(payload.getUserId()))
+                    .orderId(UUID.fromString(payload.getOrderId()))
+                    .qty(payload.getQty())
+                    .flashPrice(flashSaleItem.getFlashPrice())
+                    .build());
+        }
+
+        flashSaleItem.setSoldQty(flashSaleItem.getSoldQty()+ payload.getQty());
+
+        flashSaleItemRepo.save(flashSaleItem);
+
+        idempotencyService.markProcessed(eventId);
     }
 
     private List<FlashSaleActiveItemResponse> buildActiveItems(List<FlashSaleItem> flashSaleItems) {

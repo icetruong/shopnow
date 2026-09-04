@@ -1,4 +1,4 @@
-package com.ice.orderservice.Service;
+package com.ice.promotionservice.Service;
 
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.redis.core.StringRedisTemplate;

@@ -17,4 +17,12 @@ public interface FlashSaleRepo extends JpaRepository<FlashSale, UUID> {
           ORDER BY fs.endsAt ASC
 """)
     List<FlashSale> findActive(@Param("now") LocalDateTime now);
+
+    @Query("""
+    SELECT fs FROM FlashSale fs
+    WHERE fs.status = com.ice.promotionservice.Enum.FlashSaleStatus.SCHEDULED
+      AND fs.isWarmed = true
+      AND fs.startsAt <= :now AND fs.endsAt > :now
+    """)
+    List<FlashSale> findDueForActivation(@Param("now") LocalDateTime now);
 }

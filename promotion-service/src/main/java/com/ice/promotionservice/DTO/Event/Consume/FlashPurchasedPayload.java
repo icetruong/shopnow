@@ -1,4 +1,4 @@
-package com.ice.inventoryservice.DTO.Event;
+package com.ice.promotionservice.DTO.Event.Consume;
 
 import lombok.AllArgsConstructor;
 import lombok.Getter;
