@@ -571,8 +571,6 @@ Hoàn lại số lượng flash sale khi đơn bị hủy (compensating).
 ```
 
 **Response 200**
-```
-
 **Flow bên trong (orchestration):**
 ```
 1. Gọi Inventory Service:
@@ -616,6 +614,7 @@ Tạo flash sale mới.
 ```json
 {
   "success": true,
+  "message": "Tạo flash sale thành công",
   "data": { "flashSaleId": "fs-uuid-1" }
 }
 ```

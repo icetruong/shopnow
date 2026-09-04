@@ -2,10 +2,13 @@ package com.ice.promotionservice.Controller;
 
 import com.ice.promotionservice.DTO.Request.Coupon.AdminCreateRequest;
 import com.ice.promotionservice.DTO.Request.Coupon.CouponUpdateRequest;
+import com.ice.promotionservice.DTO.Request.FlashSale.CreateAdminFlashSaleRequest;
 import com.ice.promotionservice.DTO.Response.Common.ApiResponse;
 import com.ice.promotionservice.DTO.Response.Coupon.AdminCreateResponse;
 import com.ice.promotionservice.DTO.Response.Coupon.CouponUpdateResponse;
 import com.ice.promotionservice.DTO.Response.Coupon.PageCouponAdminResponse;
+import com.ice.promotionservice.DTO.Response.FlashSale.CreateFlashSaleAdminResponse;
+import com.ice.promotionservice.DTO.Response.FlashSale.WarmupFlashSaleResponse;
 import com.ice.promotionservice.Service.PromotionService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -70,6 +73,28 @@ public class AdminPromotionController {
                 ApiResponse.success(
                         "Lấy danh sách coupon thành công",
                         promotionService.listCoupons(page, size, status, keyword)
+                )
+        );
+    }
+
+    @PostMapping("/flash-sales")
+    public ResponseEntity<ApiResponse<CreateFlashSaleAdminResponse>> createFlashSale(@Valid @RequestBody CreateAdminFlashSaleRequest request)
+    {
+        return ResponseEntity.status(HttpStatus.CREATED).body(
+                ApiResponse.success(
+                        "Tạo flash sale thành công",
+                        promotionService.createFlashSale(request)
+                )
+        );
+    }
+
+    @PostMapping("/flash-sales/{flashSaleId}/warmup")
+    public ResponseEntity<ApiResponse<WarmupFlashSaleResponse>> warmup(@PathVariable String flashSaleId)
+    {
+        return ResponseEntity.ok(
+                ApiResponse.success(
+                        "Đã nạp flash sale vào Redis. Sẵn sàng!",
+                        promotionService.warmup(flashSaleId)
                 )
         );
     }

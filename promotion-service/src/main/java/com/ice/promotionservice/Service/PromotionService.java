@@ -3,10 +3,14 @@ package com.ice.promotionservice.Service;
 import com.ice.promotionservice.Client.InventoryClient;
 import com.ice.promotionservice.Client.ProductClient;
 import com.ice.promotionservice.DTO.Request.Coupon.*;
+import com.ice.promotionservice.DTO.Request.FlashSale.CreateAdminFlashSaleItemRequest;
+import com.ice.promotionservice.DTO.Request.FlashSale.CreateAdminFlashSaleRequest;
 import com.ice.promotionservice.DTO.Request.FlashSale.FlashSalePurchaseRequest;
 import com.ice.promotionservice.DTO.Request.FlashSale.FlashSaleRollbackRequest;
 import com.ice.promotionservice.DTO.Request.Inventory.FlashSaleReleaseRequest;
+import com.ice.promotionservice.DTO.Request.Inventory.FlashSaleRequest;
 import com.ice.promotionservice.DTO.Request.Inventory.FlashSaleReserveRequest;
+import com.ice.promotionservice.DTO.Request.Inventory.ItemFlashSaleRequest;
 import com.ice.promotionservice.DTO.Request.Product.ProductBatchRequest;
 import com.ice.promotionservice.DTO.Response.Coupon.AdminCreateResponse;
 import com.ice.promotionservice.DTO.Response.Coupon.CouponAdminResponse;
@@ -16,9 +20,7 @@ import com.ice.promotionservice.DTO.Response.Coupon.PageCouponAdminResponse;
 import com.ice.promotionservice.DTO.Response.Coupon.StatisticsCouponAdminResponse;
 import com.ice.promotionservice.DTO.Response.Coupon.CouponUserResponse;
 import com.ice.promotionservice.DTO.Response.Coupon.ValidationCouponResponse;
-import com.ice.promotionservice.DTO.Response.FlashSale.FlashSaleActiveItemResponse;
-import com.ice.promotionservice.DTO.Response.FlashSale.FlashSaleActiveResponse;
-import com.ice.promotionservice.DTO.Response.FlashSale.FlashSalePurchaseResponse;
+import com.ice.promotionservice.DTO.Response.FlashSale.*;
 import com.ice.promotionservice.DTO.Response.Inventory.FlashSaleReserveResponse;
 import com.ice.promotionservice.DTO.Response.Product.ProductBatchResponse;
 import com.ice.promotionservice.DTO.Response.Product.ProductItemBatchResponse;
@@ -31,6 +33,7 @@ import com.ice.promotionservice.Exception.InventoryServiceUnavailableException;
 import com.ice.promotionservice.Exception.ResourceNotFoundException;
 import com.ice.promotionservice.Repository.*;
 import com.ice.promotionservice.Util.CouponSpecification;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -512,6 +515,92 @@ public class PromotionService {
 
         flashSalePurchaseRepo.save(flashSalePurchase);
         flashSaleItemRepo.save(flashSaleItem);
+    }
+
+    @Transactional
+    public CreateFlashSaleAdminResponse createFlashSale(CreateAdminFlashSaleRequest request) {
+        LocalDateTime startsAt = request.getStartsAt().atZone(ZoneId.systemDefault()).toLocalDateTime();
+        LocalDateTime endsAt = request.getEndsAt().atZone(ZoneId.systemDefault()).toLocalDateTime();
+        if (!endsAt.isAfter(startsAt) || !endsAt.isAfter(LocalDateTime.now())) {
+            throw new FlashSaleException(FlashSaleError.FLASH_SALE_TIME_RANGE_INVALID);
+        }
+
+        List<CreateAdminFlashSaleItemRequest> itemRequests = request.getItems();
+        long distinctVariants = itemRequests.stream()
+                .map(CreateAdminFlashSaleItemRequest::getVariantId)
+                .distinct()
+                .count();
+        if (distinctVariants != itemRequests.size()) {
+            throw new FlashSaleException(FlashSaleError.FLASH_SALE_DUPLICATE_VARIANT);
+        }
+
+        FlashSale flashSale = FlashSale.builder()
+                .title(request.getTitle())
+                .startsAt(startsAt)
+                .endsAt(endsAt)
+                .build();
+
+        FlashSale saved = flashSaleRepo.save(flashSale);
+
+        List<FlashSaleItem> flashSaleItems = new ArrayList<>();
+        for (CreateAdminFlashSaleItemRequest itemRequest : itemRequests)
+        {
+            flashSaleItems.add(FlashSaleItem.builder()
+                    .flashSale(saved)
+                    .productId(parseUuid(itemRequest.getProductId(), "productId"))
+                    .variantId(parseUuid(itemRequest.getVariantId(), "variantId"))
+                    .flashPrice(itemRequest.getFlashPrice())
+                    .totalQty(itemRequest.getTotalQty())
+                    .limitPerUser(itemRequest.getLimitPerUser())
+                    .build()
+            );
+        }
+        flashSaleItemRepo.saveAll(flashSaleItems);
+
+        return new CreateFlashSaleAdminResponse(saved.getId().toString());
+    }
+
+    private static UUID parseUuid(String value, String field) {
+        try {
+            return UUID.fromString(value);
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException(field + " không đúng định dạng UUID");
+        }
+    }
+
+    @Transactional
+    public WarmupFlashSaleResponse warmup(String flashSaleId) {
+        FlashSale flashSale = flashSaleRepo.findById(UUID.fromString(flashSaleId))
+                .orElseThrow(() -> new FlashSaleException(FlashSaleError.FLASH_SALE_NOT_FOUND));
+
+        if (Boolean.TRUE.equals(flashSale.getIsWarmed())) {
+            throw new FlashSaleException(FlashSaleError.FLASH_SALE_ALREADY_WARMED);
+        }
+
+        List<FlashSaleItem> flashSaleItems = flashSaleItemRepo.findAllByFlashSaleId(UUID.fromString(flashSaleId));
+
+        if (flashSaleItems.isEmpty()) {
+            throw new FlashSaleException(FlashSaleError.FLASH_SALE_NO_ITEMS);
+        }
+
+        inventoryClient.warmupFlashSale(new FlashSaleRequest(
+                flashSale.getId().toString(),
+                flashSale.getStartsAt().atZone(ZoneId.systemDefault()).toInstant(),
+                flashSale.getEndsAt().atZone(ZoneId.systemDefault()).toInstant(),
+                flashSaleItems.stream().map(
+                        flashSaleItem -> new ItemFlashSaleRequest(
+                                flashSaleItem.getVariantId().toString(),
+                                flashSaleItem.getTotalQty()
+                        )
+                ).toList()
+        ));
+
+        flashSale.setIsWarmed(true);
+        flashSaleRepo.save(flashSale);
+
+        return new WarmupFlashSaleResponse(
+                flashSaleItems.size()
+        );
     }
 
     private List<FlashSaleActiveItemResponse> buildActiveItems(List<FlashSaleItem> flashSaleItems) {

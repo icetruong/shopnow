@@ -73,7 +73,11 @@ public class InventoryClient {
                     .body(request)
                     .retrieve()
                     .toBodilessEntity();
+        } catch (HttpClientErrorException e) {
+            // 4xx: lỗi nghiệp vụ warmup của inventory -> map sang FlashSaleException để admin thấy đúng nguyên nhân.
+            throw mapWarmupBusinessError(e);
         } catch (RestClientException e) {
+            // 5xx + timeout + connection refused.
             throw new InventoryServiceUnavailableException(
                     "Không gọi được inventory-service (warmup): " + describe(e));
         }
@@ -109,6 +113,26 @@ public class InventoryClient {
             case "FLASH_SALE_NOT_ACTIVE" -> new FlashSaleException(FlashSaleError.FLASH_SALE_NOT_ACTIVE);
             default -> new InventoryServiceUnavailableException(
                     "inventory-service trả errorCode lạ: " + errorCode);
+        };
+    }
+
+    /**
+     * Map body lỗi 4xx của inventory warmup (POST /internal/flash-sale-stock) sang exception nghiệp vụ.
+     * errorCode không nằm trong danh sách đã biết -> coi như inventory hỏng (502).
+     */
+    private RuntimeException mapWarmupBusinessError(HttpClientErrorException e) {
+        String errorCode = extractErrorCode(e);
+        if (errorCode == null) {
+            return new InventoryServiceUnavailableException(
+                    "inventory-service trả " + e.getStatusCode() + " không rõ errorCode (warmup)");
+        }
+        return switch (errorCode) {
+            case "FLASH_SALE_ALREADY_EXISTS" -> new FlashSaleException(FlashSaleError.FLASH_SALE_ALREADY_WARMED);
+            case "INVENTORY_NOT_FOUND"       -> new FlashSaleException(FlashSaleError.FLASH_SALE_WARMUP_INVENTORY_MISSING);
+            case "NOT_ENOUGH"                -> new FlashSaleException(FlashSaleError.FLASH_SALE_WARMUP_NOT_ENOUGH_STOCK);
+            case "INVALID_REQUEST"           -> new FlashSaleException(FlashSaleError.FLASH_SALE_TIME_RANGE_INVALID);
+            default -> new InventoryServiceUnavailableException(
+                    "inventory-service trả errorCode lạ (warmup): " + errorCode);
         };
     }
 
