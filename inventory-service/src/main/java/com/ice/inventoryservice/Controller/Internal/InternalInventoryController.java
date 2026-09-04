@@ -1,6 +1,8 @@
 package com.ice.inventoryservice.Controller.Internal;
 
+import com.ice.inventoryservice.DTO.Request.Admin.FlashSaleRequest;
 import com.ice.inventoryservice.DTO.Request.Inventory.*;
+import com.ice.inventoryservice.DTO.Response.Common.ApiResponse;
 import com.ice.inventoryservice.DTO.Response.Inventory.*;
 import com.ice.inventoryservice.Service.FlashSaleService;
 import com.ice.inventoryservice.Service.InventoryService;
@@ -71,6 +73,28 @@ public class InternalInventoryController {
     @PostMapping("/stock/flash-sale/reserve")
     public ResponseEntity<FlashSaleReserveResponse> flashSaleReserve(@Valid @RequestBody FlashSaleReserveRequest request) {
         return ResponseEntity.ok(flashSaleService.reserve(request));
+    }
+
+    @PostMapping("/stock/flash-sale/release")
+    public ResponseEntity<Void> flashSaleRelease(@Valid @RequestBody FlashSaleReleaseRequest request) {
+        flashSaleService.release(request);
+        return ResponseEntity.ok(null);
+    }
+
+    @PostMapping("/flash-sale-stock")
+    public ResponseEntity<ApiResponse<Void>> warmupFlashSale(@Valid @RequestBody FlashSaleRequest request) {
+        flashSaleService.createdFlashSale(request);
+        return ResponseEntity.ok(
+                ApiResponse.success("Đã khởi tạo tồn kho flash sale thành công.", null)
+        );
+    }
+
+    @PostMapping("/flash-sale-stock/{flashSaleId}/activate")
+    public ResponseEntity<ApiResponse<Void>> activateFlashSale(@PathVariable UUID flashSaleId) {
+        flashSaleService.activate(flashSaleId);
+        return ResponseEntity.ok(
+                ApiResponse.success("Đã kích hoạt flash sale.", null)
+        );
     }
 
 

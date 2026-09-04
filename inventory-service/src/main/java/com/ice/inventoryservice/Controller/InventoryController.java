@@ -1,13 +1,11 @@
 package com.ice.inventoryservice.Controller;
 
 import com.ice.inventoryservice.DTO.Request.Admin.AdjustQuantityOrderRequest;
-import com.ice.inventoryservice.DTO.Request.Admin.FlashSaleRequest;
 import com.ice.inventoryservice.DTO.Request.Admin.ImportQuantityOrderRequest;
 import com.ice.inventoryservice.DTO.Response.Admin.*;
 import com.ice.inventoryservice.DTO.Response.Common.ApiResponse;
 import com.ice.inventoryservice.Enum.StockStatus;
 import com.ice.inventoryservice.Enum.StockTransactionType;
-import com.ice.inventoryservice.Service.FlashSaleService;
 import com.ice.inventoryservice.Service.InventoryService;
 import com.ice.inventoryservice.Service.StockTransactionService;
 import jakarta.validation.Valid;
@@ -24,7 +22,6 @@ import java.util.UUID;
 public class InventoryController {
     private final InventoryService inventoryService;
     private final StockTransactionService stockTransactionService;
-    private final FlashSaleService flashSaleService;
 
     @GetMapping("/stock")
     public ResponseEntity<ApiResponse<PageStockResponse<StockResponse>>> getStock(
@@ -79,18 +76,6 @@ public class InventoryController {
                 ApiResponse.success(
                         "Lấy lịch sử biến động tồn kho thành công.",
                         stockTransactionService.getHistory(variantId, page, size, startDate, endDate, type)
-                )
-        );
-    }
-
-    @PostMapping("/flash-sale-stock")
-    public ResponseEntity<ApiResponse<Void>> createFlashSale(@Valid @RequestBody FlashSaleRequest request)
-    {
-        flashSaleService.createdFlashSale(request);
-        return ResponseEntity.ok(
-                ApiResponse.success(
-                        "Đã khởi tạo tồn kho flash sale thành công.",
-                        null
                 )
         );
     }

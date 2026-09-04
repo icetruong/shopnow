@@ -642,14 +642,18 @@ type      = IMPORT    (IMPORT | DEDUCT | RELEASE | ADJUSTMENT | FLASH_SALE)
 
 ---
 
-## 3. FLASH SALE STOCK — Khởi tạo flash sale
+## 3. FLASH SALE STOCK — Khởi tạo & kích hoạt flash sale
+
+Cả 2 endpoint dưới đây đều là **internal** (Promotion Service gọi service-to-service, `X-Internal-Token`), không phải endpoint admin — không có con người/UI gọi trực tiếp.
 
 ---
 
-### POST /admin/flash-sale-stock
+### POST /internal/flash-sale-stock
 Khởi tạo tồn kho flash sale trong Redis (**"warmup"**) — chạy trước giờ G vài phút.
 
-> **Promotion Service gọi endpoint này** trong bước `POST /admin/flash-sales/{id}/warmup`. Admin không gọi trực tiếp (nhưng vẫn để role ADMIN + internal token cho tiện test).
+**Header:** `X-Internal-Token: {sharedSecret}`
+
+> **Promotion Service gọi endpoint này** trong bước warmup flash sale của nó.
 
 **Request Body**
 ```json
@@ -674,16 +678,64 @@ Khởi tạo tồn kho flash sale trong Redis (**"warmup"**) — chạy trước
 }
 ```
 
-**Logic:**
-```
-1. Validate flashSaleQty <= stockQty thực tế của từng variant → 409 INSUFFICIENT_STOCK nếu thiếu
-2. SET flash:stock:{flashSaleId}:{variantId} = flashSaleQty   (TTL đến endsAt)
-3. SET flash:active:{flashSaleId} = "1"                        (TTL đến endsAt)
-   (hoặc: job hẹn giờ bật đúng startsAt — tránh mua sớm trong khoảng warmup→startsAt)
-4. INSERT flash_sale_stocks (audit + restore nếu Redis mất)
+**Response 409** — flash sale này đã warmup rồi
+```json
+{ "success": false, "errorCode": "FLASH_SALE_ALREADY_EXISTS", "message": "Flash sale này đã được khởi tạo tồn kho." }
 ```
 
+**Response 404** — có variantId chưa có inventory
+```json
+{ "success": false, "errorCode": "INVENTORY_NOT_FOUND", "message": "Một số variantId chưa có inventory." }
+```
+
+**Response 409** — không đủ tồn kho (`NOT_ENOUGH`) khi `flashSaleQty > availableQty` của variant.
+
+**Logic:**
+```
+1. Validate startsAt < endsAt và endsAt > now → 400 INVALID_REQUEST nếu sai
+2. Đã tồn tại flash_sale_stocks cho flashSaleId → 409 FLASH_SALE_ALREADY_EXISTS
+3. Validate flashSaleQty <= availableQty (= stockQty - reservedQty) từng variant
+   → thiếu inventory: 404 INVENTORY_NOT_FOUND ; không đủ: 409 NOT_ENOUGH
+4. INSERT flash_sale_stocks (audit + restore nếu Redis mất) + flush NGAY
+   (ghi DB trước Redis: lỗi ràng buộc un(flash_sale_id, variant_id) → rollback trước khi đụng Redis)
+5. SET flash:stock:{flashSaleId}:{variantId} = flashSaleQty   (TTL đến endsAt)
+```
+
+> **KHÔNG** set `flash:active` ở bước warmup. Cờ `flash:active` bật riêng qua `POST /internal/flash-sale-stock/{flashSaleId}/activate` đúng thời điểm `startsAt` — tránh mua sớm trong khoảng warmup→startsAt.
+
 > **Tại sao warmup trước:** đợi request mua đầu tiên mới nạp DB→Redis → hàng nghìn request cùng cache-miss một lúc → **cache stampede**, DB nghẽn. Warmup trước → Redis sẵn sàng 100% khi giờ G tới.
+
+---
+
+### POST /internal/flash-sale-stock/{flashSaleId}/activate
+Bật cờ `flash:active` cho flash sale — **Promotion Service gọi đúng thời điểm `startsAt`** (Promotion tự hẹn giờ bằng scheduler của nó).
+
+**Header:** `X-Internal-Token: {sharedSecret}`
+
+**Path param:** `flashSaleId` — UUID của flash sale đã warmup.
+
+**Response 200**
+```json
+{ "success": true, "message": "Đã kích hoạt flash sale." }
+```
+
+**Response 404** — chưa warmup
+```json
+{ "success": false, "errorCode": "FLASH_SALE_NOT_FOUND", "message": "Chưa khởi tạo tồn kho cho flash sale này." }
+```
+
+**Response 400** — đã quá `endsAt`
+```json
+{ "success": false, "errorCode": "FLASH_SALE_NOT_ACTIVE", "message": "Flash sale chưa bắt đầu hoặc đã kết thúc." }
+```
+
+**Logic:**
+```
+1. Lấy flash_sale_stocks theo flashSaleId → rỗng ⇒ 404 FLASH_SALE_NOT_FOUND
+2. ttl = số giây từ now đến endsAt (đọc từ flash_sale_stocks) → <= 0 ⇒ 400 FLASH_SALE_NOT_ACTIVE
+3. SET flash:active:{flashSaleId} = "1" EX ttl NX   (idempotent — gọi lại / nhiều instance đều vô hại)
+```
+> Từ thời điểm này `reserve()` mới cho mua (nó chỉ kiểm tra sự tồn tại của `flash:active`).
 
 ---
 
@@ -697,10 +749,13 @@ Inventory Service **không consume event nào cả** — reserve/release/deduct 
 
 | Code | HTTP | Ý nghĩa |
 |------|------|---------|
-| `INSUFFICIENT_STOCK` | 409 | Không đủ hàng để reserve (kể cả warmup flashSaleQty > stockQty) |
+| `INSUFFICIENT_STOCK` | 409 | Không đủ hàng để reserve đơn thường |
 | `FLASH_SALE_SOLD_OUT` | 409 | Hết hàng flash sale |
 | `FLASH_SALE_USER_LIMIT` | 409 | User đã mua đủ `limitPerUser` |
 | `FLASH_SALE_NOT_ACTIVE` | 400 | Flash sale chưa bắt đầu / đã kết thúc (key `flash:active` không có) |
+| `FLASH_SALE_NOT_FOUND` | 404 | Chưa warmup flash sale này (không có bản ghi `flash_sale_stocks`) |
+| `FLASH_SALE_ALREADY_EXISTS` | 409 | Warmup lại một flash sale đã khởi tạo |
+| `NOT_ENOUGH` | 409 | `flashSaleQty > availableQty` khi warmup |
 | `INVENTORY_NOT_FOUND` | 404 | Không tìm thấy inventory theo variantId |
 | `RESERVATION_NOT_FOUND` | 404 | Không tìm thấy reservation theo orderId |
 | `STOCK_NOT_FOUND` | 404 | Không tìm thấy variant trong kho |
@@ -722,11 +777,12 @@ Inventory Service **không consume event nào cả** — reserve/release/deduct 
 | POST | /internal/stock/return | 🔒 Internal | — |
 | POST | /internal/stock/flash-sale/reserve | 🔒 Internal | — |
 | POST | /internal/stock/flash-sale/release | 🔒 Internal | — |
+| POST | /internal/flash-sale-stock | 🔒 Internal | — |
+| POST | /internal/flash-sale-stock/{flashSaleId}/activate | 🔒 Internal | — |
 | GET | /admin/stock | ✅ | ADMIN |
 | POST | /admin/stock/{variantId}/import | ✅ | ADMIN |
 | POST | /admin/stock/{variantId}/adjust | ✅ | ADMIN |
 | GET | /admin/stock/{variantId}/history | ✅ | ADMIN |
-| POST | /admin/flash-sale-stock | ✅ | ADMIN |
 
 ---
 
@@ -851,8 +907,8 @@ CREATE UNIQUE INDEX idx_flash_sale_stocks_unique ON flash_sale_stocks(flash_sale
 
 | Key pattern | Value | TTL | Mục đích |
 |-------------|-------|-----|---------|
-| `flash:stock:{flashSaleId}:{variantId}` | INT (số lượng còn) | Đến endsAt | Counter tồn kho — DECRBY trong Lua |
-| `flash:active:{flashSaleId}` | `"1"` | Đến endsAt | Cờ flash sale còn chạy |
+| `flash:stock:{flashSaleId}:{variantId}` | INT (số lượng còn) | Đến endsAt | Counter tồn kho — DECRBY trong Lua. Set khi **warmup** (`POST /internal/flash-sale-stock`) |
+| `flash:active:{flashSaleId}` | `"1"` | Đến endsAt | Cờ flash sale còn chạy. Set khi **activate** (`POST /internal/flash-sale-stock/{id}/activate`) đúng `startsAt`, KHÔNG set lúc warmup |
 | `flash:user:{flashSaleId}:{variantId}:{userId}` | **INT (số đã mua)** | Đến endsAt | So với `limitPerUser` trong Lua — **counter**, không phải `"1"` |
 | `flash:done:{orderId}:{variantId}` | `"1"` | Đến endsAt | Idempotency reserve/release theo đơn hàng |
 
@@ -1060,7 +1116,7 @@ Long r = redisTemplate.execute(script,
 
 **Idempotency:** trước khi chạy `reserve`, `SET flash:done:{orderId}:{variantId} 1 EX ttl NX`. Key đã tồn tại → Order Service retry → không chạy Lua, trả kết quả cũ.
 
-**Ghi DB async:** sau khi Lua trả `>= 0` → publish `flash.purchased` → Promotion Service consume ghi lịch sử. Job định kỳ sync `flash:stock` → `flash_sale_stocks.sold_qty`. Redis chết giữa chừng → warmup lại từ `flash_sale_stocks`; bật AOF để recover phần delta chưa sync.
+**Ghi DB async:** sau khi Lua trả `>= 0` → publish `flash.purchased` → Promotion Service consume ghi lịch sử. Job định kỳ sync `flash:stock` → `flash_sale_stocks.sold_qty`. Redis chết giữa chừng → nạp lại key từ `flash_sale_stocks` (đường phục hồi này KHÔNG đi qua `POST /internal/flash-sale-stock` vì endpoint đó chặn 409 nếu đã có bản ghi — cần path phục hồi riêng); bật AOF để recover phần delta chưa sync.
 
 ---
 
