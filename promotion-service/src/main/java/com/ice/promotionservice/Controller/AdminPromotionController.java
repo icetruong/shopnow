@@ -17,12 +17,12 @@ import java.util.UUID;
 
 @RestController
 @RequiredArgsConstructor
-@RequestMapping("/api/v1/admin/coupons")
+@RequestMapping("/api/v1/admin")
 public class AdminPromotionController {
 
     private final PromotionService promotionService;
 
-    @PostMapping
+    @PostMapping("/coupons")
     public ResponseEntity<ApiResponse<AdminCreateResponse>> createCoupon(@Valid @RequestBody AdminCreateRequest request)
     {
         return ResponseEntity.status(HttpStatus.CREATED).body(
@@ -33,7 +33,7 @@ public class AdminPromotionController {
         );
     }
 
-    @PutMapping("/{couponId}")
+    @PutMapping("/coupons/{couponId}")
     public ResponseEntity<ApiResponse<CouponUpdateResponse>> updateCoupon(
             @PathVariable UUID couponId,
             @Valid @RequestBody CouponUpdateRequest request)
@@ -46,7 +46,7 @@ public class AdminPromotionController {
         );
     }
 
-    @DeleteMapping("/{couponId}")
+    @DeleteMapping("/coupons/{couponId}")
     public ResponseEntity<ApiResponse<Void>> deleteCoupon(@PathVariable UUID couponId)
     {
         promotionService.deleteCoupon(couponId);
@@ -59,7 +59,7 @@ public class AdminPromotionController {
         );
     }
 
-    @GetMapping
+    @GetMapping("/coupons")
     public ResponseEntity<ApiResponse<PageCouponAdminResponse>> listCoupons(
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size,

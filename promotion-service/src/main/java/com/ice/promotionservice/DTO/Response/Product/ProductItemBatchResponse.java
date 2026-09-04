@@ -1,4 +1,4 @@
-package com.ice.productservice.DTO.Response.Internal;
+package com.ice.promotionservice.DTO.Response.Product;
 
 import lombok.AllArgsConstructor;
 import lombok.Getter;

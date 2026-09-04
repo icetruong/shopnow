@@ -1,6 +1,7 @@
 package com.ice.promotionservice.Exception;
 
 import com.ice.promotionservice.DTO.Response.Common.ApiResponse;
+import com.ice.promotionservice.Enum.ErrorCode;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -48,5 +49,11 @@ public class HandleGlobalException {
     public ResponseEntity<ApiResponse<Void>> handleCouponAdmin(CouponAdminException ex) {
         return ResponseEntity.status(ex.getError().getStatus())
                 .body(ApiResponse.fail(ex.getMessage(), ex.getError().name()));
+    }
+
+    @ExceptionHandler(ProductServiceUnavailableException.class)
+    public ResponseEntity<ApiResponse<Void>> handleProductServiceUnavailable(ProductServiceUnavailableException ex) {
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                .body(ApiResponse.fail(ex.getMessage(), ErrorCode.PRODUCT_SERVICE_UNAVAILABLE.name()));
     }
 }

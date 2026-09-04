@@ -4,6 +4,7 @@ import com.ice.promotionservice.DTO.Request.Coupon.ValidationCouponRequest;
 import com.ice.promotionservice.DTO.Response.Common.ApiResponse;
 import com.ice.promotionservice.DTO.Response.Coupon.CouponUserResponse;
 import com.ice.promotionservice.DTO.Response.Coupon.ValidationCouponResponse;
+import com.ice.promotionservice.DTO.Response.FlashSale.FlashSaleActiveResponse;
 import com.ice.promotionservice.Service.PromotionService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -16,12 +17,12 @@ import java.util.List;
 
 @RestController
 @RequiredArgsConstructor
-@RequestMapping("/api/v1/coupons")
+@RequestMapping("/api/v1")
 public class PromotionController {
 
     private final PromotionService promotionService;
 
-    @PostMapping("/validate")
+    @PostMapping("/coupons/validate")
     public ResponseEntity<ApiResponse<ValidationCouponResponse>> validationCoupon(@Valid @RequestBody ValidationCouponRequest request)
     {
         return ResponseEntity.ok(
@@ -32,7 +33,7 @@ public class PromotionController {
         );
     }
 
-    @GetMapping("/available")
+    @GetMapping("/coupons/available")
     public ResponseEntity<ApiResponse<List<CouponUserResponse>>> getCouponForUser(
             Authentication authentication
     )
@@ -43,6 +44,17 @@ public class PromotionController {
                 ApiResponse.success(
                         "Lấy danh sách coupon thành công",
                         promotionService.getCouponForUser(userId)
+                )
+        );
+    }
+
+    @GetMapping("/flash-sales/active")
+    public ResponseEntity<ApiResponse<FlashSaleActiveResponse>> getFlashSaleActive()
+    {
+        return ResponseEntity.ok(
+                ApiResponse.success(
+                        "Lấy danh sách flash sale thành công",
+                        promotionService.getFlashSaleActive()
                 )
         );
     }

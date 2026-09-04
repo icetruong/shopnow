@@ -452,6 +452,7 @@ Lấy flash sale đang diễn ra (hiển thị trang chủ).
 ```json
 {
   "success": true,
+  "message": "Lấy danh sách flash sale thành công",
   "data": {
     "flashSaleId": "fs-uuid-1",
     "title":       "Flash Sale 12.12",

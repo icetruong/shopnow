@@ -1,6 +1,8 @@
 package com.ice.promotionservice.Service;
 
+import com.ice.promotionservice.Client.ProductClient;
 import com.ice.promotionservice.DTO.Request.Coupon.*;
+import com.ice.promotionservice.DTO.Request.Product.ProductBatchRequest;
 import com.ice.promotionservice.DTO.Response.Coupon.AdminCreateResponse;
 import com.ice.promotionservice.DTO.Response.Coupon.CouponAdminResponse;
 import com.ice.promotionservice.DTO.Response.Coupon.CouponApplyResponse;
@@ -9,8 +11,14 @@ import com.ice.promotionservice.DTO.Response.Coupon.PageCouponAdminResponse;
 import com.ice.promotionservice.DTO.Response.Coupon.StatisticsCouponAdminResponse;
 import com.ice.promotionservice.DTO.Response.Coupon.CouponUserResponse;
 import com.ice.promotionservice.DTO.Response.Coupon.ValidationCouponResponse;
+import com.ice.promotionservice.DTO.Response.FlashSale.FlashSaleActiveItemResponse;
+import com.ice.promotionservice.DTO.Response.FlashSale.FlashSaleActiveResponse;
+import com.ice.promotionservice.DTO.Response.Product.ProductBatchResponse;
+import com.ice.promotionservice.DTO.Response.Product.ProductItemBatchResponse;
 import com.ice.promotionservice.Entity.Coupon;
 import com.ice.promotionservice.Entity.CouponUsage;
+import com.ice.promotionservice.Entity.FlashSale;
+import com.ice.promotionservice.Entity.FlashSaleItem;
 import com.ice.promotionservice.Enum.CouponApplicableType;
 import com.ice.promotionservice.Enum.CouponDiscountType;
 import com.ice.promotionservice.Enum.CouponAdminError;
@@ -22,6 +30,8 @@ import com.ice.promotionservice.Exception.CouponInvalidException;
 import com.ice.promotionservice.Exception.ResourceNotFoundException;
 import com.ice.promotionservice.Repository.CouponRepo;
 import com.ice.promotionservice.Repository.CouponUsageRepo;
+import com.ice.promotionservice.Repository.FlashSaleItemRepo;
+import com.ice.promotionservice.Repository.FlashSaleRepo;
 import com.ice.promotionservice.Util.CouponSpecification;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -34,9 +44,11 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -48,6 +60,9 @@ public class PromotionService {
     private final CouponRepo couponRepo;
     private final CouponUsageRepo couponUsageRepo;
     private final CouponCounterService couponCounterService;
+    private final FlashSaleRepo flashSaleRepo;
+    private final FlashSaleItemRepo flashSaleItemRepo;
+    private final ProductClient productClient;
 
     public ValidationCouponResponse validationCoupon(ValidationCouponRequest request) {
 
@@ -408,6 +423,98 @@ public class PromotionService {
                 (long) result.getTotalPages(),
                 buildStatistics(now)
         );
+    }
+
+    public FlashSaleActiveResponse getFlashSaleActive() {
+        FlashSale flashSale = flashSaleRepo.findActive(LocalDateTime.now()).stream()
+                .findFirst()
+                .orElse(null);
+
+        if (flashSale == null) {
+            return null; // controller vẫn trả success=true, data=null
+        }
+
+        List<FlashSaleItem> flashSaleItems = flashSaleItemRepo.findAllByFlashSaleId(flashSale.getId());
+
+        List<FlashSaleActiveItemResponse> flashSaleActiveItemResponses =
+                buildActiveItems(flashSaleItems);
+
+        return new FlashSaleActiveResponse(
+                flashSale.getId().toString(),
+                flashSale.getTitle(),
+                flashSale.getStartsAt().atZone(ZoneId.systemDefault()).toInstant(),
+                flashSale.getEndsAt().atZone(ZoneId.systemDefault()).toInstant(),
+                Instant.now(),
+                flashSaleActiveItemResponses
+        );
+    }
+
+    private List<FlashSaleActiveItemResponse> buildActiveItems(List<FlashSaleItem> flashSaleItems) {
+        // Flash sale không có item -> trả list rỗng, KHÔNG gọi product-service với variantIds rỗng (sẽ 400).
+        if (flashSaleItems.isEmpty()) {
+            return List.of();
+        }
+
+        List<String> variantIds = flashSaleItems.stream()
+                .map(flashSaleItem -> flashSaleItem.getVariantId().toString())
+                .toList();
+
+        ProductBatchResponse productBatchResponse =
+                productClient.getBatch(new ProductBatchRequest(variantIds));
+
+        // getBatch() throw ProductServiceUnavailableException khi service lỗi -> tới đây body đã 200.
+        // Vẫn phòng body 200 nhưng rỗng/thiếu field.
+        List<ProductItemBatchResponse> variants =
+                (productBatchResponse == null || productBatchResponse.getVariants() == null)
+                        ? List.of()
+                        : productBatchResponse.getVariants();
+
+        Map<UUID, ProductItemBatchResponse> productByVariantId = variants.stream()
+                .collect(Collectors.toMap(
+                        variant -> UUID.fromString(variant.getVariantId()),
+                        variant -> variant
+                ));
+
+        List<FlashSaleActiveItemResponse> result = new ArrayList<>();
+
+        for (FlashSaleItem flashSaleItem : flashSaleItems) {
+            ProductItemBatchResponse product = productByVariantId.get(flashSaleItem.getVariantId());
+            // Spec product-service: variantId không tồn tại bị bỏ khỏi mảng "variants".
+            // -> bỏ qua item này, không render card lỗi trên trang chủ.
+            if (product == null) {
+                continue;
+            }
+
+            int totalQty = flashSaleItem.getTotalQty() == null ? 0 : flashSaleItem.getTotalQty();
+            int soldRaw = flashSaleItem.getSoldQty() == null ? 0 : flashSaleItem.getSoldQty();
+            // sold_qty đồng bộ async từ Kafka, có thể tạm vượt total -> kẹp về [0, totalQty].
+            int soldQty = Math.min(Math.max(soldRaw, 0), totalQty);
+            int remaining = Math.max(0, totalQty - soldQty);
+            int soldPercent = totalQty == 0 ? 0 : Math.min(100, soldQty * 100 / totalQty);
+
+            Long originalPrice = product.getPrice();
+            Long discountPct = (originalPrice == null || originalPrice <= 0)
+                    ? null
+                    : (originalPrice - flashSaleItem.getFlashPrice()) * 100 / originalPrice;
+
+            result.add(new FlashSaleActiveItemResponse(
+                    flashSaleItem.getId().toString(),
+                    flashSaleItem.getProductId().toString(),
+                    flashSaleItem.getVariantId().toString(),
+                    product.getProductName(),
+                    product.getThumbnail(),
+                    originalPrice,
+                    flashSaleItem.getFlashPrice(),
+                    discountPct,
+                    totalQty,
+                    soldQty,
+                    remaining,
+                    soldPercent,
+                    flashSaleItem.getLimitPerUser()
+            ));
+        }
+
+        return result;
     }
 
     private StatisticsCouponAdminResponse buildStatistics(LocalDateTime now) {
