@@ -3,6 +3,7 @@ package com.ice.promotionservice.Controller.Internal;
 import com.ice.promotionservice.DTO.Request.Coupon.CouponApplyRequest;
 import com.ice.promotionservice.DTO.Request.Coupon.CouponRollbackRequest;
 import com.ice.promotionservice.DTO.Request.FlashSale.FlashSalePurchaseRequest;
+import com.ice.promotionservice.DTO.Request.FlashSale.FlashSaleRollbackRequest;
 import com.ice.promotionservice.DTO.Response.Coupon.CouponApplyResponse;
 import com.ice.promotionservice.DTO.Response.FlashSale.FlashSalePurchaseResponse;
 import com.ice.promotionservice.Service.PromotionService;
@@ -30,7 +31,7 @@ public class PromotionInternalController {
     }
 
     @PostMapping("/coupons/rollback")
-    public ResponseEntity<Void> rollback(@Valid @RequestBody CouponRollbackRequest request)
+    public ResponseEntity<Void> rollbackCoupon(@Valid @RequestBody CouponRollbackRequest request)
     {
         promotionService.rollback(request);
 
@@ -44,6 +45,15 @@ public class PromotionInternalController {
     {
         return ResponseEntity.ok(
                 promotionService.purchase(request)
+        );
+    }
+
+    @PostMapping("/flash-sales/rollback")
+    public ResponseEntity<Void> rollbackFlashSale(@Valid @RequestBody FlashSaleRollbackRequest request)
+    {
+        promotionService.rollbackFlashSale(request);
+        return ResponseEntity.ok(
+                null
         );
     }
 }

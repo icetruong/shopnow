@@ -571,11 +571,6 @@ Hoàn lại số lượng flash sale khi đơn bị hủy (compensating).
 ```
 
 **Response 200**
-```json
-{
-  "success": true,
-  "message": "Đã hoàn lại số lượng flash sale."
-}
 ```
 
 **Flow bên trong (orchestration):**

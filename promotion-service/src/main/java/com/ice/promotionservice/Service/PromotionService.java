@@ -4,6 +4,8 @@ import com.ice.promotionservice.Client.InventoryClient;
 import com.ice.promotionservice.Client.ProductClient;
 import com.ice.promotionservice.DTO.Request.Coupon.*;
 import com.ice.promotionservice.DTO.Request.FlashSale.FlashSalePurchaseRequest;
+import com.ice.promotionservice.DTO.Request.FlashSale.FlashSaleRollbackRequest;
+import com.ice.promotionservice.DTO.Request.Inventory.FlashSaleReleaseRequest;
 import com.ice.promotionservice.DTO.Request.Inventory.FlashSaleReserveRequest;
 import com.ice.promotionservice.DTO.Request.Product.ProductBatchRequest;
 import com.ice.promotionservice.DTO.Response.Coupon.AdminCreateResponse;
@@ -20,26 +22,14 @@ import com.ice.promotionservice.DTO.Response.FlashSale.FlashSalePurchaseResponse
 import com.ice.promotionservice.DTO.Response.Inventory.FlashSaleReserveResponse;
 import com.ice.promotionservice.DTO.Response.Product.ProductBatchResponse;
 import com.ice.promotionservice.DTO.Response.Product.ProductItemBatchResponse;
-import com.ice.promotionservice.Entity.Coupon;
-import com.ice.promotionservice.Entity.CouponUsage;
-import com.ice.promotionservice.Entity.FlashSale;
-import com.ice.promotionservice.Entity.FlashSaleItem;
-import com.ice.promotionservice.Enum.CouponApplicableType;
-import com.ice.promotionservice.Enum.CouponDiscountType;
-import com.ice.promotionservice.Enum.CouponAdminError;
-import com.ice.promotionservice.Enum.CouponInvalidReason;
-import com.ice.promotionservice.Enum.CouponStatus;
-import com.ice.promotionservice.Enum.CouponUsageStatus;
-import com.ice.promotionservice.Enum.FlashSaleError;
+import com.ice.promotionservice.Entity.*;
+import com.ice.promotionservice.Enum.*;
 import com.ice.promotionservice.Exception.CouponAdminException;
 import com.ice.promotionservice.Exception.CouponInvalidException;
 import com.ice.promotionservice.Exception.FlashSaleException;
 import com.ice.promotionservice.Exception.InventoryServiceUnavailableException;
 import com.ice.promotionservice.Exception.ResourceNotFoundException;
-import com.ice.promotionservice.Repository.CouponRepo;
-import com.ice.promotionservice.Repository.CouponUsageRepo;
-import com.ice.promotionservice.Repository.FlashSaleItemRepo;
-import com.ice.promotionservice.Repository.FlashSaleRepo;
+import com.ice.promotionservice.Repository.*;
 import com.ice.promotionservice.Util.CouponSpecification;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -70,6 +60,7 @@ public class PromotionService {
     private final CouponCounterService couponCounterService;
     private final FlashSaleRepo flashSaleRepo;
     private final FlashSaleItemRepo flashSaleItemRepo;
+    private final FlashSalePurchaseRepo flashSalePurchaseRepo;
     private final ProductClient productClient;
     private final InventoryClient inventoryClient;
 
@@ -486,6 +477,41 @@ public class PromotionService {
                 reserveResponse.getRemaining(),
                 reserveResponse.getReservedAt()
         );
+    }
+
+    @Transactional
+    public void rollbackFlashSale(FlashSaleRollbackRequest request) {
+
+        FlashSalePurchase flashSalePurchase = flashSalePurchaseRepo.findByFlashSaleIdAndOrderId(
+                        UUID.fromString(request.getFlashSaleId()),
+                        UUID.fromString(request.getOrderId()))
+                .orElse(null);
+
+        // Idempotent (spec bước 3): không có bản ghi purchase, hoặc đã ROLLED_BACK -> bỏ qua, vẫn trả 200.
+        if (flashSalePurchase == null
+                || flashSalePurchase.getStatus() == FlashSalePurchaseStatus.ROLLED_BACK) {
+            return;
+        }
+
+        // Tra item TRƯỚC khi gọi release: nếu item không còn, fail sớm để không release Redis rồi mới rollback DB.
+        FlashSaleItem flashSaleItem = flashSaleItemRepo.findByFlashSaleIdAndVariantId(
+                        UUID.fromString(request.getFlashSaleId()),
+                        UUID.fromString(request.getVariantId()))
+                .orElseThrow(() -> new FlashSaleException(FlashSaleError.FLASH_SALE_ITEM_NOT_FOUND));
+
+        inventoryClient.release(new FlashSaleReleaseRequest(
+                request.getFlashSaleId(),
+                request.getVariantId(),
+                request.getOrderId(),
+                request.getUserId(),
+                flashSalePurchase.getQty()
+        ));
+
+        flashSalePurchase.setStatus(FlashSalePurchaseStatus.ROLLED_BACK);
+        flashSaleItem.setSoldQty(Math.max(0, flashSaleItem.getSoldQty() - flashSalePurchase.getQty()));
+
+        flashSalePurchaseRepo.save(flashSalePurchase);
+        flashSaleItemRepo.save(flashSaleItem);
     }
 
     private List<FlashSaleActiveItemResponse> buildActiveItems(List<FlashSaleItem> flashSaleItems) {

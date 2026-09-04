@@ -11,4 +11,5 @@ public interface FlashSaleItemRepo extends JpaRepository<FlashSaleItem, UUID> {
     List<FlashSaleItem> findAllByFlashSaleId(UUID flashSaleId);
 
     Optional<FlashSaleItem> findByIdAndFlashSaleIdAndVariantId(UUID id, UUID flashSaleId, UUID variantId);
+    Optional<FlashSaleItem> findByFlashSaleIdAndVariantId(UUID flashSaleId, UUID variantId);
 }
