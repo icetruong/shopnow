@@ -1,7 +1,10 @@
 package com.ice.promotionservice.Service;
 
+import com.ice.promotionservice.Client.InventoryClient;
 import com.ice.promotionservice.Client.ProductClient;
 import com.ice.promotionservice.DTO.Request.Coupon.*;
+import com.ice.promotionservice.DTO.Request.FlashSale.FlashSalePurchaseRequest;
+import com.ice.promotionservice.DTO.Request.Inventory.FlashSaleReserveRequest;
 import com.ice.promotionservice.DTO.Request.Product.ProductBatchRequest;
 import com.ice.promotionservice.DTO.Response.Coupon.AdminCreateResponse;
 import com.ice.promotionservice.DTO.Response.Coupon.CouponAdminResponse;
@@ -13,6 +16,8 @@ import com.ice.promotionservice.DTO.Response.Coupon.CouponUserResponse;
 import com.ice.promotionservice.DTO.Response.Coupon.ValidationCouponResponse;
 import com.ice.promotionservice.DTO.Response.FlashSale.FlashSaleActiveItemResponse;
 import com.ice.promotionservice.DTO.Response.FlashSale.FlashSaleActiveResponse;
+import com.ice.promotionservice.DTO.Response.FlashSale.FlashSalePurchaseResponse;
+import com.ice.promotionservice.DTO.Response.Inventory.FlashSaleReserveResponse;
 import com.ice.promotionservice.DTO.Response.Product.ProductBatchResponse;
 import com.ice.promotionservice.DTO.Response.Product.ProductItemBatchResponse;
 import com.ice.promotionservice.Entity.Coupon;
@@ -25,8 +30,11 @@ import com.ice.promotionservice.Enum.CouponAdminError;
 import com.ice.promotionservice.Enum.CouponInvalidReason;
 import com.ice.promotionservice.Enum.CouponStatus;
 import com.ice.promotionservice.Enum.CouponUsageStatus;
+import com.ice.promotionservice.Enum.FlashSaleError;
 import com.ice.promotionservice.Exception.CouponAdminException;
 import com.ice.promotionservice.Exception.CouponInvalidException;
+import com.ice.promotionservice.Exception.FlashSaleException;
+import com.ice.promotionservice.Exception.InventoryServiceUnavailableException;
 import com.ice.promotionservice.Exception.ResourceNotFoundException;
 import com.ice.promotionservice.Repository.CouponRepo;
 import com.ice.promotionservice.Repository.CouponUsageRepo;
@@ -63,6 +71,7 @@ public class PromotionService {
     private final FlashSaleRepo flashSaleRepo;
     private final FlashSaleItemRepo flashSaleItemRepo;
     private final ProductClient productClient;
+    private final InventoryClient inventoryClient;
 
     public ValidationCouponResponse validationCoupon(ValidationCouponRequest request) {
 
@@ -446,6 +455,36 @@ public class PromotionService {
                 flashSale.getEndsAt().atZone(ZoneId.systemDefault()).toInstant(),
                 Instant.now(),
                 flashSaleActiveItemResponses
+        );
+    }
+
+    public FlashSalePurchaseResponse purchase(FlashSalePurchaseRequest request) {
+        FlashSale flashSale = flashSaleRepo.findById(UUID.fromString(request.getFlashSaleId()))
+                .orElseThrow(() -> new FlashSaleException(FlashSaleError.FLASH_SALE_NOT_FOUND));
+
+        FlashSaleItem flashSaleItem = flashSaleItemRepo.findByIdAndFlashSaleIdAndVariantId(
+                        UUID.fromString(request.getFlashItemId()),
+                        UUID.fromString(request.getFlashSaleId()),
+                        UUID.fromString(request.getVariantId()))
+                .orElseThrow(() -> new FlashSaleException(FlashSaleError.FLASH_SALE_ITEM_NOT_FOUND));
+
+        FlashSaleReserveResponse reserveResponse = inventoryClient.reserve(new FlashSaleReserveRequest(
+                flashSale.getId().toString(),
+                request.getVariantId(),
+                request.getOrderId(),
+                request.getUserId(),
+                request.getQty(),
+                flashSaleItem.getLimitPerUser()
+        ));
+
+        if (reserveResponse == null || reserveResponse.getRemaining() == null) {
+            throw new InventoryServiceUnavailableException("inventory-service reserve trả body rỗng");
+        }
+
+        return new FlashSalePurchaseResponse(
+                flashSaleItem.getFlashPrice(),
+                reserveResponse.getRemaining(),
+                reserveResponse.getReservedAt()
         );
     }
 

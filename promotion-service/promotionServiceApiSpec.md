@@ -508,6 +508,7 @@ Lấy flash sale đang diễn ra (hiển thị trang chủ).
 ```json
 {
   "success": true,
+  "message": "Mua flash sale thành công",
   "data": {
     "flashPrice": 149000,
     "remaining":  32,

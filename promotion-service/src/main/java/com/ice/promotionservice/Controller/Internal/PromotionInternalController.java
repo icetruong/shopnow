@@ -2,7 +2,9 @@ package com.ice.promotionservice.Controller.Internal;
 
 import com.ice.promotionservice.DTO.Request.Coupon.CouponApplyRequest;
 import com.ice.promotionservice.DTO.Request.Coupon.CouponRollbackRequest;
+import com.ice.promotionservice.DTO.Request.FlashSale.FlashSalePurchaseRequest;
 import com.ice.promotionservice.DTO.Response.Coupon.CouponApplyResponse;
+import com.ice.promotionservice.DTO.Response.FlashSale.FlashSalePurchaseResponse;
 import com.ice.promotionservice.Service.PromotionService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -14,12 +16,12 @@ import org.springframework.web.bind.annotation.RestController;
 
 @RestController
 @RequiredArgsConstructor
-@RequestMapping("/api/v1/internal/coupons")
+@RequestMapping("/api/v1/internal")
 public class PromotionInternalController {
 
     private final PromotionService promotionService;
 
-    @PostMapping("/apply")
+    @PostMapping("/coupons/apply")
     public ResponseEntity<CouponApplyResponse> apply(@Valid @RequestBody CouponApplyRequest request)
     {
         return ResponseEntity.ok(
@@ -27,7 +29,7 @@ public class PromotionInternalController {
         );
     }
 
-    @PostMapping("/rollback")
+    @PostMapping("/coupons/rollback")
     public ResponseEntity<Void> rollback(@Valid @RequestBody CouponRollbackRequest request)
     {
         promotionService.rollback(request);
@@ -37,4 +39,11 @@ public class PromotionInternalController {
         );
     }
 
+    @PostMapping("/flash-sales/purchase")
+    public ResponseEntity<FlashSalePurchaseResponse> purchase(@Valid @RequestBody FlashSalePurchaseRequest request)
+    {
+        return ResponseEntity.ok(
+                promotionService.purchase(request)
+        );
+    }
 }

@@ -56,4 +56,16 @@ public class HandleGlobalException {
         return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
                 .body(ApiResponse.fail(ex.getMessage(), ErrorCode.PRODUCT_SERVICE_UNAVAILABLE.name()));
     }
+
+    @ExceptionHandler(InventoryServiceUnavailableException.class)
+    public ResponseEntity<ApiResponse<Void>> handleInventoryServiceUnavailable(InventoryServiceUnavailableException ex) {
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                .body(ApiResponse.fail(ex.getMessage(), ErrorCode.INVENTORY_SERVICE_UNAVAILABLE.name()));
+    }
+
+    @ExceptionHandler(FlashSaleException.class)
+    public ResponseEntity<ApiResponse<Void>> handleFlashSale(FlashSaleException ex) {
+        return ResponseEntity.status(ex.getError().getStatus())
+                .body(ApiResponse.fail(ex.getMessage(), ex.getError().name()));
+    }
 }

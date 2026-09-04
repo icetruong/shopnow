@@ -1,4 +1,4 @@
-package com.ice.inventoryservice.DTO.Response.Inventory;
+package com.ice.promotionservice.DTO.Response.Inventory;
 
 import lombok.AllArgsConstructor;
 import lombok.Getter;
@@ -11,7 +11,7 @@ import java.time.Instant;
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
-public class FlashSaleReserveResponse{
+public class FlashSaleReserveResponse {
     private Boolean success;
     private Long remaining;
     private Instant reservedAt;
