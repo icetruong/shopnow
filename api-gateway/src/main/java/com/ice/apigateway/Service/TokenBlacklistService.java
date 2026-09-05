@@ -1,4 +1,4 @@
-package com.qlda.userservice.Service;
+package com.ice.apigateway.Service;
 
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.redis.core.StringRedisTemplate;

@@ -1,0 +1,81 @@
+
+spring:
+  application:
+    name: api-gateway
+  cloud:
+    gateway:
+      server:
+        webmvc:
+          routes:
+            - id: user-service
+              uri: lb://user-service
+              predicates:
+                - Path=/api/v1/auth/**,/api/v1/users/**,/api/v1/admin/users/**
+            - id: oauth2
+              uri: lb://user-service
+              predicates:
+                - Path=/oauth2/**
+            - id: product-service
+              uri: lb://product-service
+              predicates:
+                - Path=/api/v1/products/**,/api/v1/categories/**,/api/v1/admin/products/**,/api/v1/admin/categories/**
+            - id: inventory-service
+              uri: lb://inventory-service
+              predicates:
+                - Path=/api/v1/admin/stock/**
+            - id: cart-service
+              uri: lb://cart-service
+              predicates:
+                - Path=/api/v1/cart/**
+            - id: order-service
+              uri: lb://order-service
+              predicates:
+                - Path=/api/v1/orders/**,/api/v1/admin/orders/**
+            - id: payment-service
+              uri: lb://payment-service
+              predicates:
+                - Path=/api/v1/payments/**,/api/v1/admin/payments/**
+            - id: shipping-service
+              uri: lb://shipping-service
+              predicates:
+                - Path=/api/v1/shipping/**,/api/v1/shipments/**,/api/v1/admin/shipments/**
+            - id: notification-service
+              uri: lb://notification-service
+              predicates:
+                - Path=/api/v1/notifications/**,/api/v1/admin/notifications/**
+            - id: search-service
+              uri: lb://search-service
+              predicates:
+                - Path=/api/v1/search/**
+            - id: review-service
+              uri: lb://review-service
+              predicates:
+                - Path=/api/v1/reviews/**,/api/v1/admin/reviews/**
+            - id: promotion-service
+              uri: lb://promotion-service
+              predicates:
+                - Path=/api/v1/coupons/**,/api/v1/flash-sales/**,/api/v1/admin/coupons/**,/api/v1/admin/flash-sales/**
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          public-key-location: classpath:keys/public.pem
+  data:
+    redis:
+      host: localhost
+      port: 6379
+
+server:
+  port: 8080
+eureka:
+  client:
+    service-url:
+      defaultZone: http://localhost:8761/eureka/
+  instance:
+    prefer-ip-address: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,gateway
